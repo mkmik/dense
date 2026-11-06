@@ -1,11 +1,10 @@
-import AppKit
 import SwiftUI
 
 /// The sidebar on the left of the window: the Space tree from dennet. Clicking a Space
 /// shows its tabs.
 struct SpaceSidebar: View {
     @ObservedObject var store: SpaceStore = .shared
-    @ObservedObject var tabs: SpaceTabs = .shared
+    @ObservedObject var tabs: SpaceTabs
 
     var body: some View {
         ScrollView {
@@ -21,10 +20,7 @@ struct SpaceSidebar: View {
                         .background(row.id == tabs.selected ? Color.accentColor.opacity(0.2) : .clear,
                                     in: RoundedRectangle(cornerRadius: 5))
                         .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard let window = NSApp.keyWindow else { return }
-                            tabs.select(row.space, in: window)
-                        }
+                        .onTapGesture { tabs.select(row.space) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

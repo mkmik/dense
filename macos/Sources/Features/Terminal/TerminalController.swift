@@ -702,6 +702,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             return
         }
 
+        // dense: closing a Space's tab drops the tab, not the window.
+        if spaceTabs.closeActiveTab() { return }
+
         // More than 1 window means we have tabs and we're closing a tab
         if window?.tabGroup?.windows.count ?? 0 > 1 {
             if withConfirmation {
@@ -1092,6 +1095,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         shouldCascadeWindows = false
     }
 
+    /// dense: the Space shown in this window and its tabs.
+    lazy var spaceTabs = SpaceTabs(controller: self)
+
     override func windowDidLoad() {
         super.windowDidLoad()
         guard let window else { return }
@@ -1114,9 +1120,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         // Initialize our content view to the SwiftUI root
         let container = TerminalViewContainer {
-            HStack(spacing: 0) {
-                SpaceSidebar()
-                Divider()
+            SpaceWindowView(tabs: spaceTabs) {
                 TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
             }
         }

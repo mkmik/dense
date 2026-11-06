@@ -22,11 +22,13 @@ change anything yet. dense connects to dennet's socket at
 `~/.local/state/dennet/dennet.sock`; if it can't, the sidebar says why and
 dense keeps trying every two seconds.
 
-Milestone 3 (in progress): clicking a Space shows its terminal Surfaces as
-the window's tabs, in `order`. Each tab runs `den attach` for its Den. The
-tabs of the Space you left are hidden, not closed, so going back is
-instant. Plain Ghostty tabs stay where they are. Clicking a Space with no
-terminal Surfaces does nothing yet.
+Milestone 3 (in progress): clicking a Space shows a tab bar above the
+terminal, right of the sidebar, with one tab per terminal Surface in
+`order`. Each tab runs `den attach` for its Den. Tabs out of view keep
+running, so switching back is instant. Closing a tab, or `den attach`
+exiting, drops the tab's terminal but keeps the window; clicking the tab
+attaches again. The terminal the window opened with is kept running out of
+view once a Space is shown.
 
 ## Build
 

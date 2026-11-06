@@ -1,85 +1,86 @@
-import AppKit
 import Combine
 import Foundation
 
-/// Shows the terminal Surfaces of the selected Space as the native tabs of a window.
+/// The Space shown in one window, and which of its tabs (Surfaces) is in front.
 ///
-/// Each Surface gets its own TerminalController, whose window is one native tab, running
-/// `den attach`. Selecting a Space moves its windows into the window's tab group in
-/// `order`, then takes the other Spaces' windows out of the group and hides them. Hidden
-/// windows keep running, so switching back is instant and nothing is attached twice.
-/// Plain Ghostty tabs, which are not Surfaces, are left where they are.
+/// The window's terminal area shows one tab at a time by swapping the controller's
+/// surface tree. Each terminal Surface gets its own Ghostty surface running `den attach`,
+/// made the first time the tab is shown. Tabs out of view keep running, so switching is
+/// instant and nothing attaches twice. The terminal the window opened with is kept running
+/// the same way.
 final class SpaceTabs: ObservableObject {
-    static let shared = SpaceTabs()
-
-    /// The id of the selected Space.
+    /// The id of the Space shown, or nil while the window shows its own terminal.
     @Published private(set) var selected: String?
 
-    /// One controller per Surface id, made the first time its Space is selected.
-    private var controllers: [String: TerminalController] = [:]
+    /// The Surface id of the tab in front, or nil when the Space shows no tab.
+    @Published private(set) var active: String?
 
-    /// The Surface id of the tab that was in front when each Space (by id) was left.
+    private weak var controller: TerminalController?
+
+    /// Each tab's terminal tree, by Surface id. A tree can hold splits made inside the tab.
+    private var trees: [String: SplitTree<Ghostty.SurfaceView>] = [:]
+
+    /// The tab last in front in each Space, by Space id.
     private var lastTab: [String: String] = [:]
 
-    func select(_ space: Space, in window: NSWindow) {
-        guard let ghostty = (NSApp.delegate as? AppDelegate)?.ghostty else { return }
+    /// The window's own terminal tree, set aside while a tab is shown.
+    private var home: SplitTree<Ghostty.SurfaceView>?
 
-        // ponytail: a Space with no terminal Surfaces can't be shown yet; making a tab in it
-        // comes with writing back to dennet.
-        let surfaces = space.terminals(Array(SpaceStore.shared.surfaces.values))
-        guard !surfaces.isEmpty else { return }
-        let tabs = surfaces.compactMap { controller(for: $0, ghostty: ghostty, like: window).window }
+    init(controller: TerminalController) {
+        self.controller = controller
+    }
 
-        if let selected, let front = window.tabGroup?.selectedWindow {
-            lastTab[selected] = surfaceID(of: front)
-        }
-
-        // Put the tabs in order around `window`, which stays in place while they move.
-        let anchor = tabs.firstIndex(of: window)
-        for tab in tabs.prefix(anchor ?? 0) { move(tab, next: window, .below) }
-        for tab in tabs.suffix(from: (anchor ?? -1) + 1).reversed() { move(tab, next: window, .above) }
-
-        let front = tabs.first { surfaceID(of: $0) == lastTab[space.id] } ?? tabs[0]
-        guard let group = front.tabGroup else { return }
-        group.selectedWindow = front
-        front.makeKeyAndOrderFront(nil)
-
-        // Hide the other Spaces' tabs. `window` itself may be one of them.
-        let surfaceWindows = controllers.values.compactMap(\.window)
-        for other in group.windows where surfaceWindows.contains(other) && !tabs.contains(other) {
-            group.removeWindow(other)
-            other.orderOut(nil)
-        }
-
+    func select(_ space: Space) {
         selected = space.id
-        (front.windowController as? TerminalController)?.relabelTabs()
+        let surfaces = space.terminals(Array(SpaceStore.shared.surfaces.values))
+        show(surfaces.first { $0.id == lastTab[space.id] } ?? surfaces.first)
     }
 
-    private func move(_ tab: NSWindow, next anchor: NSWindow, _ order: NSWindow.OrderingMode) {
-        if tab.tabGroup === anchor.tabGroup { anchor.tabGroup?.removeWindow(tab) }
-        anchor.addTabbedWindowSafely(tab, ordered: order)
+    /// Brings a tab of the selected Space to the front; nil shows no tab.
+    func show(_ surface: Surface?) {
+        guard let controller else { return }
+
+        // Set aside what the window shows now. While no tab is shown, that is `home`.
+        if let active { trees[active] = controller.surfaceTree } else { home = controller.surfaceTree }
+
+        active = surface?.id
+        guard let surface else {
+            controller.surfaceTree = home ?? controller.surfaceTree
+            return
+        }
+        if let selected { lastTab[selected] = surface.id }
+
+        // A tab whose den attach has exited is attached again.
+        let tree = trees[surface.id].flatMap { $0.allSatisfy(\.processExited) ? nil : $0 }
+            ?? SplitTree(view: makeView(surface, controller: controller))
+        let old = controller.focusedSurface
+        controller.surfaceTree = tree
+        if let view = tree.root?.leftmostLeaf() {
+            DispatchQueue.main.async { Ghostty.moveFocus(to: view, from: old) }
+        }
     }
 
-    private func surfaceID(of window: NSWindow) -> String? {
-        controllers.first { $0.value.window === window }?.key
+    /// Called when the terminal filling the window is closing (den attach exited, or the
+    /// user closed it). If it is a tab, the tab is dropped and the next one is shown, and
+    /// this returns true. Otherwise it returns false and the window closes as usual.
+    func closeActiveTab() -> Bool {
+        guard let controller, let closing = active, let home else { return false }
+        trees[closing] = nil
+        active = nil
+        controller.surfaceTree = home
+
+        // ponytail: the Surface is still in dennet, so its tab stays in the tab bar and a
+        // click attaches again. Deleting the Surface comes with writing back to dennet.
+        let space = selected.flatMap { SpaceStore.shared.spaces[$0] }
+        show(space?.terminals(Array(SpaceStore.shared.surfaces.values)).first { $0.id != closing })
+        return true
     }
 
-    private func controller(for surface: Surface, ghostty: Ghostty.App, like window: NSWindow) -> TerminalController {
-        if let controller = controllers[surface.id] { return controller }
-
+    private func makeView(_ surface: Surface, controller: TerminalController) -> Ghostty.SurfaceView {
         var config = Ghostty.SurfaceConfiguration()
         config.command = Self.attachCommand(namespace: surface.metadata.namespace ?? "default", den: surface.spec.terminal?.den ?? "")
-        let controller = TerminalController(ghostty, withBaseConfig: config)
-        controller.isBackgroundOpaque = (window.windowController as? BaseTerminalController)?.isBackgroundOpaque ?? false
-        controller.titleOverride = surface.spec.title.flatMap { $0.isEmpty ? nil : $0 }
-        controllers[surface.id] = controller
-
-        // When the tab closes (den attach exited, or the user closed it), forget it so the
-        // next selection attaches again.
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: controller.window, queue: .main) { [weak self] _ in
-            self?.controllers[surface.id] = nil
-        }
-        return controller
+        guard let app = controller.ghostty.app else { preconditionFailure("app must be loaded") }
+        return Ghostty.SurfaceView(app, baseConfig: config)
     }
 
     static func attachCommand(namespace: String, den: String) -> String {
