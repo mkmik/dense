@@ -173,6 +173,46 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
+    /// Asks for a title and makes a new Space in dennet, under `parent` or at the top
+    /// level, after its siblings. Then shows it.
+    func newSpace(parent: Space?) {
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.placeholderString = "Title"
+        let alert = NSAlert()
+        alert.messageText = parent == nil ? "New Space" : "New Subspace"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Create")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+
+        let create = { [weak self] (response: NSApplication.ModalResponse) in
+            let title = field.stringValue.trimmingCharacters(in: .whitespaces)
+            guard let self, response == .alertFirstButtonReturn, !title.isEmpty else { return }
+            let namespace = parent?.metadata.namespace ?? "default"
+            let siblings = SpaceStore.shared.spaces.values.filter {
+                $0.metadata.namespace ?? "default" == namespace && $0.spec.parent == parent?.metadata.name
+            }
+            var spec: [String: Any] = ["title": title, "order": (siblings.compactMap(\.spec.order).max() ?? 0) + 10]
+            if let parent { spec["parent"] = parent.metadata.name }
+
+            Task { @MainActor in
+                do {
+                    let space: Space = try await SpaceStore.shared.create(
+                        "spaces", kind: "Space", namespace: namespace,
+                        metadata: ["generateName": "space-"], spec: spec)
+                    self.select(space)
+                } catch {
+                    self.alert("Could not make a new Space", error)
+                }
+            }
+        }
+        if let window = controller?.window {
+            alert.beginSheetModal(for: window, completionHandler: create)
+        } else {
+            create(alert.runModal())
+        }
+    }
+
     /// Ghostty's goto_tab: a tab number from 1, or previous, next or last. Returns false
     /// when there is no tab to go to.
     func gotoTab(_ tab: ghostty_action_goto_tab_e) -> Bool {
