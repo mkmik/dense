@@ -1,0 +1,332 @@
+import Combine
+import Foundation
+import Network
+
+struct ObjectMeta: Decodable, Equatable {
+    var name: String
+    var namespace: String?
+}
+
+/// An object stored in dennet (`den.mkm.pub/v1alpha1`). Only the fields dense uses are
+/// decoded; other fields are ignored.
+protocol DennetObject: Decodable, Equatable {
+    var metadata: ObjectMeta { get }
+}
+
+extension DennetObject {
+    /// "namespace/name", unique across namespaces.
+    var id: String { objectID(metadata.namespace, metadata.name) }
+}
+
+private func objectID(_ namespace: String?, _ name: String) -> String { "\(namespace ?? "")/\(name)" }
+
+/// One node of the sidebar tree.
+struct Space: DennetObject {
+    struct Spec: Decodable, Equatable {
+        var parent: String?
+        var order: Int32?
+        var title: String?
+        var subtitle: String?
+        var badges: [Badge]?
+        var state: String?
+        var collapsed: Bool?
+    }
+
+    struct Badge: Decodable, Equatable {
+        var text: String
+        var tone: String?
+    }
+
+    var metadata: ObjectMeta
+    var spec: Spec
+}
+
+/// One tab inside a Space.
+struct Surface: DennetObject {
+    struct Spec: Decodable, Equatable {
+        /// The name of the Space this tab belongs to, in the same namespace.
+        var space: String
+        var order: Int32?
+        var title: String?
+        var kind: String?
+        var terminal: Terminal?
+    }
+
+    struct Terminal: Decodable, Equatable {
+        /// The name of the Den to attach to, in the same namespace.
+        var den: String
+    }
+
+    var metadata: ObjectMeta
+    var spec: Spec
+}
+
+/// A terminal session, run by den. dense creates Dens and reads their status, which den
+/// (or dennet) keeps up to date.
+struct Den: DennetObject {
+    struct Status: Decodable, Equatable {
+        /// Pending, Running, Exited, Failed or Lost.
+        var phase: String?
+        /// den's control socket.
+        var socket: String?
+    }
+
+    var metadata: ObjectMeta
+    var status: Status?
+
+    /// Whether the den runs and has a socket to attach to.
+    var running: Bool { status?.phase == "Running" && status?.socket?.isEmpty == false }
+}
+
+extension Space {
+    /// A sidebar row: a space and how deep it sits in the tree.
+    struct Row: Identifiable, Equatable {
+        let space: Space
+        let depth: Int
+        var id: String { space.id }
+    }
+
+    /// Lays out spaces as sidebar rows: each space is followed by its children, and siblings
+    /// are sorted by order, then name. Children of a collapsed space are left out. A space
+    /// whose parent does not exist is shown at the top level. Spaces whose parents form a
+    /// loop are not shown.
+    static func rows(_ spaces: [Space]) -> [Row] {
+        let ids = Set(spaces.map(\.id))
+        let children = Dictionary(grouping: spaces) { space in
+            let parent = objectID(space.metadata.namespace, space.spec.parent ?? "")
+            return ids.contains(parent) ? parent : ""
+        }
+        var rows: [Row] = []
+        func add(_ parent: String, _ depth: Int) {
+            let sorted = (children[parent] ?? []).sorted {
+                ($0.spec.order ?? 0, $0.metadata.name) < ($1.spec.order ?? 0, $1.metadata.name)
+            }
+            for space in sorted {
+                rows.append(Row(space: space, depth: depth))
+                if space.spec.collapsed != true { add(space.id, depth + 1) }
+            }
+        }
+        add("", 0)
+        return rows
+    }
+
+    /// This space's terminal Surfaces, sorted by order, then name.
+    func terminals(_ surfaces: [Surface]) -> [Surface] {
+        surfaces
+            .filter { $0.metadata.namespace == metadata.namespace && $0.spec.space == metadata.name && $0.spec.terminal != nil }
+            .sorted { ($0.spec.order ?? 0, $0.metadata.name) < ($1.spec.order ?? 0, $1.metadata.name) }
+    }
+}
+
+/// Watches the Spaces, Surfaces and Dens in dennet and keeps `spaces`, `surfaces` and
+/// `dens` up to date.
+///
+/// It speaks HTTP/1.0 over dennet's Unix socket. With HTTP/1.0 the server sends a watch
+/// as plain JSON lines, one event per line, and closes the connection when the watch ends.
+/// Each watch starts by sending every existing object, then a BOOKMARK event; only then is
+/// the old list replaced, so a reconnect never shows an empty or half-filled sidebar.
+/// When a connection drops, it reconnects after two seconds.
+final class SpaceStore: ObservableObject {
+    static let shared = SpaceStore(socketPath: NSString(string: "~/.local/state/dennet/dennet.sock").expandingTildeInPath)
+
+    /// Spaces by `id`.
+    @Published private(set) var spaces: [String: Space] = [:]
+
+    /// Surfaces by `id`.
+    @Published private(set) var surfaces: [String: Surface] = [:]
+
+    /// Dens by `id`.
+    @Published private(set) var dens: [String: Den] = [:]
+
+    /// Why dennet can't be reached right now, or nil while the watches are running.
+    @Published private(set) var problem: String?
+
+    /// True once all the lists have arrived from dennet for the first time.
+    @Published private(set) var loaded = false
+    private var loadedLists: Set<String> = []
+
+    let socketPath: String
+    private let queue = DispatchQueue(label: "pub.mkm.dense.dennet")
+
+    init(socketPath: String) {
+        self.socketPath = socketPath
+        queue.async {
+            self.watch("spaces", \.spaces)
+            self.watch("surfaces", \.surfaces)
+            self.watch("dens", \.dens)
+        }
+    }
+
+    /// The Den a terminal Surface attaches to, if dennet has it.
+    func den(of surface: Surface) -> Den? {
+        surface.spec.terminal.flatMap { dens[objectID(surface.metadata.namespace, $0.den)] }
+    }
+
+    private struct WatchEvent<Object: Decodable>: Decodable {
+        var type: String
+        /// nil for events that carry no object of the watched kind, such as BOOKMARK and ERROR.
+        var object: Object?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            type = try container.decode(String.self, forKey: .type)
+            object = try? container.decode(Object.self, forKey: .object)
+        }
+
+        enum CodingKeys: CodingKey { case type, object }
+    }
+
+    struct RequestError: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// Sends one request to dennet and returns the response body. A status other than 2xx
+    /// throws, with dennet's message when it sent one.
+    func request(
+        _ method: String,
+        _ path: String,
+        json body: [String: Any]? = nil,
+        contentType: String = "application/json"
+    ) async throws -> Data {
+        let payload = try body.map { try JSONSerialization.data(withJSONObject: $0) }
+        return try await withCheckedThrowingContinuation { continuation in
+            let conn = NWConnection(to: .unix(path: socketPath), using: .tcp)
+            var response = Data()
+            var ready = false
+            var finished = false
+
+            func finish(_ result: Result<Data, Error>) {
+                guard !finished else { return }
+                finished = true
+                conn.cancel()
+                continuation.resume(with: result)
+            }
+
+            func receive() {
+                conn.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { data, _, done, error in
+                    if let data { response.append(data) }
+                    if let error { return finish(.failure(error)) }
+                    guard done else { return receive() }
+
+                    // HTTP/1.0: the server closes the connection after the body.
+                    guard let end = response.range(of: Data("\r\n\r\n".utf8)) else {
+                        return finish(.failure(RequestError(message: "dennet sent no response")))
+                    }
+                    let status = String(decoding: response[..<end.lowerBound], as: UTF8.self).prefix { $0 != "\r" }
+                    let body = Data(response[end.upperBound...])
+                    guard status.split(separator: " ").dropFirst().first?.hasPrefix("2") == true else {
+                        let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+                        return finish(.failure(RequestError(message: json?["message"] as? String ?? "dennet: \(status)")))
+                    }
+                    finish(.success(body))
+                }
+            }
+
+            conn.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    ready = true
+                    var head = "\(method) \(path) HTTP/1.0\r\nHost: dennet\r\n"
+                    if let payload { head += "Content-Type: \(contentType)\r\nContent-Length: \(payload.count)\r\n" }
+                    conn.send(content: Data((head + "\r\n").utf8) + (payload ?? Data()), completion: .idempotent)
+                    receive()
+                case .waiting(let error), .failed(let error):
+                    // Once connected, receive() reports how it ended. dennet closing the
+                    // connection after the response can show up here first, as a failure
+                    // ("Network is down"), while the whole response is still to be read.
+                    if !ready { finish(.failure(error)) }
+                default:
+                    break
+                }
+            }
+            conn.start(queue: queue)
+        }
+    }
+
+    /// Creates an object and returns it as dennet stored it.
+    func create<T: Decodable>(
+        _ resource: String,
+        kind: String,
+        namespace: String,
+        metadata: [String: Any],
+        spec: [String: Any]
+    ) async throws -> T {
+        let body: [String: Any] = ["apiVersion": "den.mkm.pub/v1alpha1", "kind": kind, "metadata": metadata, "spec": spec]
+        let data = try await request("POST", "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)/\(resource)", json: body)
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    private func watch<Object: DennetObject>(_ resource: String, _ list: ReferenceWritableKeyPath<SpaceStore, [String: Object]>) {
+        let conn = NWConnection(to: .unix(path: socketPath), using: .tcp)
+        var buffer = Data()
+        var streaming = false
+        // The full list being rebuilt from the watch's initial events; nil once it is live.
+        var initial: [String: Object]? = [:]
+
+        func fail(_ message: String) {
+            DispatchQueue.main.async { self.problem = message }
+            conn.cancel()
+        }
+
+        func receive() {
+            conn.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { data, _, done, error in
+                if let data { buffer.append(data) }
+
+                if !streaming, let end = buffer.range(of: Data("\r\n\r\n".utf8)) {
+                    let status = String(decoding: buffer[..<end.lowerBound], as: UTF8.self).prefix { $0 != "\r" }
+                    guard status.contains(" 200 ") else { return fail("dennet \(resource): \(status)") }
+                    buffer.removeSubrange(..<end.upperBound)
+                    streaming = true
+                }
+
+                while streaming, let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+                    let event = try? JSONDecoder().decode(WatchEvent<Object>.self, from: Data(buffer[..<newline]))
+                    buffer.removeSubrange(...newline)
+                    guard let event else { continue }
+                    if let objects = initial {
+                        // The first BOOKMARK marks the end of the initial events.
+                        if event.type == "BOOKMARK" {
+                            initial = nil
+                            DispatchQueue.main.async {
+                                self[keyPath: list] = objects
+                                self.problem = nil
+                                self.loadedLists.insert(resource)
+                                if !self.loaded && self.loadedLists.count == 3 { self.loaded = true }
+                            }
+                        } else if let object = event.object {
+                            initial?[object.id] = object
+                        }
+                    } else if let object = event.object {
+                        let deleted = event.type == "DELETED"
+                        DispatchQueue.main.async {
+                            // A Den's status changes often in fields dense doesn't read.
+                            let new = deleted ? nil : object
+                            if self[keyPath: list][object.id] != new { self[keyPath: list][object.id] = new }
+                        }
+                    }
+                }
+
+                if let error { return fail("dennet: \(error)") }
+                if done { return conn.cancel() }
+                receive()
+            }
+        }
+
+        conn.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                let path = "/apis/den.mkm.pub/v1alpha1/\(resource)?watch=1&sendInitialEvents=true&allowWatchBookmarks=true&resourceVersionMatch=NotOlderThan"
+                conn.send(content: Data("GET \(path) HTTP/1.0\r\nHost: dennet\r\n\r\n".utf8), completion: .idempotent)
+                receive()
+            case .waiting(let error), .failed(let error):
+                fail("dennet: \(error) (\(self.socketPath))")
+            case .cancelled:
+                self.queue.asyncAfter(deadline: .now() + 2) { self.watch(resource, list) }
+            default:
+                break
+            }
+        }
+        conn.start(queue: queue)
+    }
+}
