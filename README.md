@@ -42,10 +42,15 @@ Needs Zig 0.17 and Xcode 26 (Xcode 26 also runs on macOS 15).
 
 ## Config
 
-dense reads the same config files as Ghostty, in `~/.config/ghostty/` and
-`~/Library/Application Support/com.mitchellh.ghostty/`. libghostty builds
-those paths from its own fixed ID, not from the app's bundle ID, so the new
-bundle ID does not change them.
+dense uses Ghostty's config file format, so a Ghostty `config.ghostty`
+can be copied over as is. It reads its own files, not Ghostty's:
+`$XDG_CONFIG_HOME/dense/config.ghostty` (`~/.config/dense/` when
+`XDG_CONFIG_HOME` is not set), then
+`~/Library/Application Support/pub.mkm.dense/config.ghostty`. Both are
+loaded when both exist, and the second wins where they set the same key.
+User themes go in `~/.config/dense/themes/`. These folders are set in
+libghostty (`src/config/file_load.zig`, `src/config/theme.zig`,
+`src/os/macos.zig`).
 
 ## Following Ghostty
 

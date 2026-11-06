@@ -18,9 +18,10 @@ pub fn isAtLeastVersion(major: i64, minor: i64, patch: i64) bool {
 
 pub const AppSupportDirError = Allocator.Error || error{AppleAPIFailed};
 
-/// Return the path to the application support directory for Ghostty
+/// Return the path to the application support directory for dense
 /// with the given sub path joined. This allocates the result using the
-/// given allocator.
+/// given allocator. dense keeps its config in its own folder, named after
+/// the app's bundle ID, not in Ghostty's.
 pub fn appSupportDir(
     alloc: Allocator,
     sub_path: []const u8,
@@ -28,6 +29,7 @@ pub fn appSupportDir(
     return try commonDir(
         alloc,
         .NSApplicationSupportDirectory,
+        "pub.mkm.dense",
         sub_path,
     );
 }
@@ -43,6 +45,7 @@ pub fn cacheDir(
     return try commonDir(
         alloc,
         .NSCachesDirectory,
+        build_config.bundle_id,
         sub_path,
     );
 }
@@ -110,6 +113,7 @@ pub const NSSearchPathDomainMask = enum(c_ulong) {
 fn commonDir(
     alloc: Allocator,
     directory: NSSearchPathDirectory,
+    dir_name: []const u8,
     sub_path: []const u8,
 ) (error{AppleAPIFailed} || Allocator.Error)![]const u8 {
     comptime assert(builtin.target.os.tag.isDarwin());
@@ -142,7 +146,7 @@ fn commonDir(
 
     return try std.fs.path.join(
         alloc,
-        &.{ base_dir, build_config.bundle_id, sub_path },
+        &.{ base_dir, dir_name, sub_path },
     );
 }
 
