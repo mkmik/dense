@@ -83,9 +83,17 @@ final class SpaceTabs: ObservableObject {
         return Ghostty.SurfaceView(app, baseConfig: config)
     }
 
+    /// The command a terminal tab runs.
+    ///
+    /// A new Ghostty surface starts at a fixed 800x600 pixels (about 50 columns) and gets its
+    /// real size a moment later, after layout. If den attach started at once, den would
+    /// shrink the session to 50 columns and rewrap everything on screen. So a small sh
+    /// script waits for the first resize (SIGWINCH), or half a second, before starting den.
+    /// `env` keeps sh from becoming a login shell: Ghostty starts commands with `exec -l`.
     static func attachCommand(namespace: String, den: String) -> String {
         let url = "http://dennet/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)/dens/\(den)"
-        return "'\(denPath)' attach --unix-socket '\(SpaceStore.shared.socketPath)' -f '\(url)'"
+        let waitForSize = #"trap : WINCH; sleep 0.5 & wait $!; kill $! 2>/dev/null; exec "$0" "$@""#
+        return "/usr/bin/env /bin/sh -c '\(waitForSize)' '\(denPath)' attach --unix-socket '\(SpaceStore.shared.socketPath)' -f '\(url)'"
     }
 
     /// Where `den` is. Apps started from the Finder don't get the PATH a shell's rc files
