@@ -2,7 +2,8 @@ import SwiftUI
 
 /// A dense window's content, laid out like Rex: the content runs under a transparent
 /// titlebar. On the left, the Space sidebar on a tinted background goes up to the top of
-/// the window, below the window buttons. On the right, the selected Space's tabs sit in
+/// the window, below the window buttons, with a button that makes a new Space at the right
+/// of the titlebar row. On the right, the selected Space's tabs sit in
 /// the titlebar row, above the terminal.
 struct SpaceWindowView<Terminal: View>: View {
     @ObservedObject var ghostty: Ghostty.App
@@ -21,12 +22,25 @@ struct SpaceWindowView<Terminal: View>: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SpaceSidebar(tabs: tabs, selection: ghostty.config.backgroundColor)
-                .padding(.top, Self.titlebarHeight + 6)
-                .frame(width: 220)
-                .frame(maxHeight: .infinity, alignment: .top)
-                // A grey wash over the terminal background, so the tint follows the theme.
-                .background(Color(white: 0.5).opacity(0.15))
+            VStack(spacing: 6) {
+                // The titlebar row, right of the window buttons.
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    NotWindowDraggable(content: Button { tabs.newSpace(parent: nil) } label: {
+                        Image(systemName: "plus").frame(width: 22, height: 22).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("New Space"))
+                }
+                .padding(.horizontal, 8)
+                .frame(height: Self.titlebarHeight)
+                SpaceSidebar(tabs: tabs, selection: ghostty.config.backgroundColor)
+            }
+            .frame(width: 220)
+            .frame(maxHeight: .infinity, alignment: .top)
+            // A grey wash over the terminal background, so the tint follows the theme.
+            .background(Color(white: 0.5).opacity(0.15))
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     // In the titlebar row a drag moves the window, unless the view under

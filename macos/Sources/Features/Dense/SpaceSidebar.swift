@@ -31,6 +31,9 @@ struct SpaceSidebar: View {
                         }
                         .contentShape(Rectangle())
                         .onTapGesture { tabs.select(row.space) }
+                        .contextMenu {
+                            Button("New Subspace…") { tabs.newSpace(parent: row.space) }
+                        }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
