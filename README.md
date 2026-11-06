@@ -24,8 +24,12 @@ dense keeps trying every two seconds.
 
 Milestone 3 (in progress): clicking a Space shows a tab bar above the
 terminal, right of the sidebar, with one tab per terminal Surface in
-`order`. Each tab runs `den attach` for its Den. Tabs out of view keep
-running, so switching back is instant. Closing a tab, or `den attach`
+`order`. Each tab runs `den attach` for its Den, once the Den's status says
+it runs (phase `Running`, with a socket); until then the tab says the den
+is not running yet, and it attaches as soon as the status changes. dense
+never starts dens itself: den reports its status to dennet, and starting
+dens is dennet's job (it can't yet). Tabs out of view keep running, so
+switching back is instant. Closing a tab, or `den attach`
 exiting, drops the tab's terminal but keeps the window; clicking the tab
 attaches again. dense remembers the selected Space and each Space's front
 tab (in its user defaults), and a new window opens on them. The plain
@@ -35,9 +39,9 @@ There are no macOS window tabs. Ghostty's tab commands act on the Space's
 tabs, wherever they come from (key bindings, menus, the command palette,
 AppleScript, Shortcuts, Services, dropping on the Dock icon):
 
-- new tab, and the + in the tab bar: creates a Den and a Surface in dennet,
-  starts the den with `den apply` (dennet does not start dens yet), and
-  shows the tab. It opens in the current tab's directory.
+- new tab, and the + in the tab bar: creates a Den and a Surface in dennet
+  and shows the tab, which waits for the den to run. The Den starts in the
+  current tab's directory.
 - go to tab N, next, previous, last: switches tabs.
 - move tab, or dragging a tab along the tab bar: writes the new `order` of
   the Space's Surfaces to dennet.

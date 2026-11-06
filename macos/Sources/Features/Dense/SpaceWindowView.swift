@@ -38,8 +38,8 @@ struct SpaceWindowView<Terminal: View>: View {
                 }
                 .padding(.horizontal, 8)
                 .frame(height: Self.titlebarHeight)
-                if tabs.selected != nil && tabs.active == nil {
-                    Text(store.loaded ? "No tabs in this Space" : "")
+                if tabs.selected != nil && (tabs.active == nil || tabs.waiting) {
+                    Text(placeholder)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -48,6 +48,16 @@ struct SpaceWindowView<Terminal: View>: View {
             }
         }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// What a Space shows when it has no terminal to show.
+    private var placeholder: String {
+        guard store.loaded else { return "" }
+        guard let active = tabs.active else { return "No tabs in this Space" }
+        switch store.surfaces[active].flatMap(store.den(of:))?.status?.phase {
+        case nil, "Pending", "Running": return "This den is not running yet"
+        case let phase?: return "This den is not running (\(phase))"
+        }
     }
 }
 

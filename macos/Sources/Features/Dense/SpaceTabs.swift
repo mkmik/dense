@@ -7,13 +7,15 @@ import GhosttyKit
 ///
 /// The window's terminal area shows one tab at a time by swapping the controller's
 /// surface tree. Each terminal Surface gets its own Ghostty surface running `den attach`,
-/// made the first time the tab is shown. Tabs out of view keep running, so switching is
-/// instant and nothing attaches twice. The terminal the window opened with is closed as
-/// soon as a tab is shown.
+/// made the first time the tab is shown while its Den's status says it runs. Until then
+/// the tab waits, and attaches as soon as the status changes. Tabs out of view keep
+/// running, so switching is instant and nothing attaches twice. The terminal the window
+/// opened with is closed as soon as a tab is shown.
 ///
 /// dense has no macOS window tabs. Ghostty's tab commands (new tab, go to tab, move tab,
 /// close tab), from key bindings, menus, AppleScript, Shortcuts or Services, act on these
-/// tabs instead. A new tab is a new Den and Surface in dennet.
+/// tabs instead. A new tab is a new Den and Surface in dennet; dense does not start the
+/// den, whoever runs Dens does.
 ///
 /// The selected Space and each Space's front tab are saved in the user defaults, and a new
 /// window opens on them once dennet's lists have loaded.
@@ -23,6 +25,9 @@ final class SpaceTabs: ObservableObject {
 
     /// The Surface id of the tab in front, or nil when the Space shows no tab.
     @Published private(set) var active: String?
+
+    /// True while the tab in front has no terminal because its den does not run yet.
+    @Published private(set) var waiting = false
 
     private weak var controller: TerminalController?
 
@@ -36,6 +41,7 @@ final class SpaceTabs: ObservableObject {
     private var pendingInput: [String: String] = [:]
 
     private var restore: AnyCancellable?
+    private var denChanges: AnyCancellable?
 
     private static let selectedKey = "dense.selectedSpace"
     private static let lastTabKey = "dense.lastTab"
@@ -51,6 +57,13 @@ final class SpaceTabs: ObservableObject {
         restore = SpaceStore.shared.$loaded.first { $0 }.receive(on: DispatchQueue.main).sink { [weak self] _ in
             guard let self, let id = self.selected else { return }
             if let space = SpaceStore.shared.spaces[id] { self.select(space) } else { self.selected = nil }
+        }
+
+        // A waiting tab attaches as soon as its den runs.
+        denChanges = SpaceStore.shared.$dens.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            guard let self, self.waiting, let surface = self.tabs.first(where: { $0.id == self.active }),
+                  SpaceStore.shared.den(of: surface)?.running == true else { return }
+            self.show(surface)
         }
     }
 
@@ -84,14 +97,19 @@ final class SpaceTabs: ObservableObject {
         UserDefaults.standard.set(selected, forKey: Self.selectedKey)
         UserDefaults.standard.set(lastTab, forKey: Self.lastTabKey)
 
-        guard let surface else {
+        // A tab whose den attach has exited is attached again, if its den runs.
+        var tree: SplitTree<Ghostty.SurfaceView>?
+        if let surface {
+            tree = trees[surface.id].flatMap { $0.allSatisfy(\.processExited) ? nil : $0 }
+            if tree == nil, SpaceStore.shared.den(of: surface)?.running == true {
+                tree = SplitTree(view: makeView(surface, controller: controller))
+            }
+        }
+        waiting = surface != nil && tree == nil
+        guard let tree else {
             controller.surfaceTree = .init()
             return
         }
-
-        // A tab whose den attach has exited is attached again.
-        let tree = trees[surface.id].flatMap { $0.allSatisfy(\.processExited) ? nil : $0 }
-            ?? SplitTree(view: makeView(surface, controller: controller))
         let old = controller.focusedSurface
         controller.surfaceTree = tree
         if let view = tree.root?.leftmostLeaf() {
@@ -114,8 +132,8 @@ final class SpaceTabs: ObservableObject {
     }
 
     /// Makes a new tab at the end of the selected Space: a Den and a Surface in dennet, then
-    /// shows it. `config` is what Ghostty asks of a new tab: working directory, command,
-    /// environment, or text to type.
+    /// shows it. The tab waits until the den runs. `config` is what Ghostty asks of a new
+    /// tab: working directory, command, environment, or text to type.
     func newTab(_ config: Ghostty.SurfaceConfiguration?) {
         guard let selected, let space = SpaceStore.shared.spaces[selected] else {
             NSSound.beep()
@@ -143,11 +161,6 @@ final class SpaceTabs: ObservableObject {
                     "dens", kind: "Den", namespace: namespace,
                     metadata: ["generateName": "\(space.metadata.name)-"], spec: den)
                 let name = created.metadata.name
-
-                // ponytail: dennet does not start dens yet, so dense runs den apply. If the
-                // Surface below fails, the Den keeps running without a tab.
-                try await Self.run(Self.denPath, ["apply", "--unix-socket", store.socketPath, "-f", Self.denURL(namespace, name)])
-
                 let surface: Surface = try await store.create(
                     "surfaces", kind: "Surface", namespace: namespace,
                     metadata: ["name": name],
@@ -220,33 +233,6 @@ final class SpaceTabs: ObservableObject {
             alert.beginSheetModal(for: window)
         } else {
             alert.runModal()
-        }
-    }
-
-    /// Runs a program and waits for it. A failure throws with what it wrote to stderr.
-    ///
-    /// stderr goes to a temporary file, not a pipe: den apply leaves a process running in
-    /// the background, and that process must not be left writing into a closed pipe.
-    private static func run(_ path: String, _ arguments: [String]) async throws {
-        let errorFile = FileManager.default.temporaryDirectory.appendingPathComponent("dense-\(UUID().uuidString).err")
-        FileManager.default.createFile(atPath: errorFile.path, contents: nil)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = try FileHandle(forWritingTo: errorFile)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            process.terminationHandler = { process in
-                let message = (try? String(contentsOf: errorFile, encoding: .utf8)) ?? ""
-                try? FileManager.default.removeItem(at: errorFile)
-                guard process.terminationStatus != 0 else { return continuation.resume() }
-                continuation.resume(throwing: SpaceStore.RequestError(message: "\(path) failed: \(message)"))
-            }
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: error)
-            }
         }
     }
 

@@ -61,6 +61,23 @@ struct Surface: DennetObject {
     var spec: Spec
 }
 
+/// A terminal session, run by den. dense creates Dens and reads their status, which den
+/// (or dennet) keeps up to date.
+struct Den: DennetObject {
+    struct Status: Decodable, Equatable {
+        /// Pending, Running, Exited, Failed or Lost.
+        var phase: String?
+        /// den's control socket.
+        var socket: String?
+    }
+
+    var metadata: ObjectMeta
+    var status: Status?
+
+    /// Whether the den runs and has a socket to attach to.
+    var running: Bool { status?.phase == "Running" && status?.socket?.isEmpty == false }
+}
+
 extension Space {
     /// A sidebar row: a space and how deep it sits in the tree.
     struct Row: Identifiable, Equatable {
@@ -101,7 +118,8 @@ extension Space {
     }
 }
 
-/// Watches the Spaces and Surfaces in dennet and keeps `spaces` and `surfaces` up to date.
+/// Watches the Spaces, Surfaces and Dens in dennet and keeps `spaces`, `surfaces` and
+/// `dens` up to date.
 ///
 /// It speaks HTTP/1.0 over dennet's Unix socket. With HTTP/1.0 the server sends a watch
 /// as plain JSON lines, one event per line, and closes the connection when the watch ends.
@@ -117,10 +135,13 @@ final class SpaceStore: ObservableObject {
     /// Surfaces by `id`.
     @Published private(set) var surfaces: [String: Surface] = [:]
 
+    /// Dens by `id`.
+    @Published private(set) var dens: [String: Den] = [:]
+
     /// Why dennet can't be reached right now, or nil while the watches are running.
     @Published private(set) var problem: String?
 
-    /// True once both lists have arrived from dennet for the first time.
+    /// True once all the lists have arrived from dennet for the first time.
     @Published private(set) var loaded = false
     private var loadedLists: Set<String> = []
 
@@ -132,7 +153,13 @@ final class SpaceStore: ObservableObject {
         queue.async {
             self.watch("spaces", \.spaces)
             self.watch("surfaces", \.surfaces)
+            self.watch("dens", \.dens)
         }
+    }
+
+    /// The Den a terminal Surface attaches to, if dennet has it.
+    func den(of surface: Surface) -> Den? {
+        surface.spec.terminal.flatMap { dens[objectID(surface.metadata.namespace, $0.den)] }
     }
 
     private struct WatchEvent<Object: Decodable>: Decodable {
@@ -265,14 +292,18 @@ final class SpaceStore: ObservableObject {
                                 self[keyPath: list] = objects
                                 self.problem = nil
                                 self.loadedLists.insert(resource)
-                                if !self.loaded && self.loadedLists.count == 2 { self.loaded = true }
+                                if !self.loaded && self.loadedLists.count == 3 { self.loaded = true }
                             }
                         } else if let object = event.object {
                             initial?[object.id] = object
                         }
                     } else if let object = event.object {
                         let deleted = event.type == "DELETED"
-                        DispatchQueue.main.async { self[keyPath: list][object.id] = deleted ? nil : object }
+                        DispatchQueue.main.async {
+                            // A Den's status changes often in fields dense doesn't read.
+                            let new = deleted ? nil : object
+                            if self[keyPath: list][object.id] != new { self[keyPath: list][object.id] = new }
+                        }
                     }
                 }
 
