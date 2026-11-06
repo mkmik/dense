@@ -181,7 +181,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
 
         // If our surface tree is now nil then we close our window.
-        if to.isEmpty {
+        // dense: unless a Space is shown, which may have no tabs.
+        if to.isEmpty && spaceTabs.selected == nil {
             self.window?.close()
         }
     }

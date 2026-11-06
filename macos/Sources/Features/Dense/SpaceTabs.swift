@@ -6,8 +6,11 @@ import Foundation
 /// The window's terminal area shows one tab at a time by swapping the controller's
 /// surface tree. Each terminal Surface gets its own Ghostty surface running `den attach`,
 /// made the first time the tab is shown. Tabs out of view keep running, so switching is
-/// instant and nothing attaches twice. The terminal the window opened with is kept running
-/// the same way.
+/// instant and nothing attaches twice. The terminal the window opened with is closed as
+/// soon as a tab is shown.
+///
+/// The selected Space and each Space's front tab are saved in the user defaults, and a new
+/// window opens on them once dennet's lists have loaded.
 final class SpaceTabs: ObservableObject {
     /// The id of the Space shown, or nil while the window shows its own terminal.
     @Published private(set) var selected: String?
@@ -21,13 +24,25 @@ final class SpaceTabs: ObservableObject {
     private var trees: [String: SplitTree<Ghostty.SurfaceView>] = [:]
 
     /// The tab last in front in each Space, by Space id.
-    private var lastTab: [String: String] = [:]
+    private var lastTab: [String: String]
 
-    /// The window's own terminal tree, set aside while a tab is shown.
-    private var home: SplitTree<Ghostty.SurfaceView>?
+    private var restore: AnyCancellable?
+
+    private static let selectedKey = "dense.selectedSpace"
+    private static let lastTabKey = "dense.lastTab"
 
     init(controller: TerminalController) {
         self.controller = controller
+        let defaults = UserDefaults.standard
+        lastTab = defaults.dictionary(forKey: Self.lastTabKey) as? [String: String] ?? [:]
+
+        // Show the saved Space right away (no terminal yet, so the window's own terminal
+        // doesn't flash), and its tab once dennet's lists are in.
+        selected = defaults.string(forKey: Self.selectedKey)
+        restore = SpaceStore.shared.$loaded.first { $0 }.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            guard let self, let id = self.selected else { return }
+            if let space = SpaceStore.shared.spaces[id] { self.select(space) } else { self.selected = nil }
+        }
     }
 
     func select(_ space: Space) {
@@ -40,15 +55,19 @@ final class SpaceTabs: ObservableObject {
     func show(_ surface: Surface?) {
         guard let controller else { return }
 
-        // Set aside what the window shows now. While no tab is shown, that is `home`.
-        if let active { trees[active] = controller.surfaceTree } else { home = controller.surfaceTree }
+        // Set aside the tab in front. If no tab is, the window shows its own terminal or
+        // nothing, and that is dropped.
+        if let active { trees[active] = controller.surfaceTree }
 
         active = surface?.id
+        if let selected, let surface { lastTab[selected] = surface.id }
+        UserDefaults.standard.set(selected, forKey: Self.selectedKey)
+        UserDefaults.standard.set(lastTab, forKey: Self.lastTabKey)
+
         guard let surface else {
-            controller.surfaceTree = home ?? controller.surfaceTree
+            controller.surfaceTree = .init()
             return
         }
-        if let selected { lastTab[selected] = surface.id }
 
         // A tab whose den attach has exited is attached again.
         let tree = trees[surface.id].flatMap { $0.allSatisfy(\.processExited) ? nil : $0 }
@@ -64,10 +83,9 @@ final class SpaceTabs: ObservableObject {
     /// user closed it). If it is a tab, the tab is dropped and the next one is shown, and
     /// this returns true. Otherwise it returns false and the window closes as usual.
     func closeActiveTab() -> Bool {
-        guard let controller, let closing = active, let home else { return false }
+        guard let closing = active else { return false }
         trees[closing] = nil
         active = nil
-        controller.surfaceTree = home
 
         // ponytail: the Surface is still in dennet, so its tab stays in the tab bar and a
         // click attaches again. Deleting the Surface comes with writing back to dennet.

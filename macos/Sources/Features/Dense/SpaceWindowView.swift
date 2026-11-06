@@ -21,7 +21,7 @@ struct SpaceWindowView<Terminal: View>: View {
                     SurfaceTabBar(tabs: tabs, surfaces: space.terminals(Array(store.surfaces.values)))
                 }
                 if tabs.selected != nil && tabs.active == nil {
-                    Text("No tabs in this Space")
+                    Text(store.loaded ? "No tabs in this Space" : "")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {

@@ -27,8 +27,9 @@ terminal, right of the sidebar, with one tab per terminal Surface in
 `order`. Each tab runs `den attach` for its Den. Tabs out of view keep
 running, so switching back is instant. Closing a tab, or `den attach`
 exiting, drops the tab's terminal but keeps the window; clicking the tab
-attaches again. The terminal the window opened with is kept running out of
-view once a Space is shown.
+attaches again. dense remembers the selected Space and each Space's front
+tab (in its user defaults), and a new window opens on them. The plain
+terminal a window starts with is closed as soon as a tab is shown.
 
 ## Build
 

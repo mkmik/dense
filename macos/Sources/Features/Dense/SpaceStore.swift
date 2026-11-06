@@ -120,6 +120,10 @@ final class SpaceStore: ObservableObject {
     /// Why dennet can't be reached right now, or nil while the watches are running.
     @Published private(set) var problem: String?
 
+    /// True once both lists have arrived from dennet for the first time.
+    @Published private(set) var loaded = false
+    private var loadedLists: Set<String> = []
+
     let socketPath: String
     private let queue = DispatchQueue(label: "pub.mkm.dense.dennet")
 
@@ -176,7 +180,12 @@ final class SpaceStore: ObservableObject {
                         // The first BOOKMARK marks the end of the initial events.
                         if event.type == "BOOKMARK" {
                             initial = nil
-                            DispatchQueue.main.async { self[keyPath: list] = objects; self.problem = nil }
+                            DispatchQueue.main.async {
+                                self[keyPath: list] = objects
+                                self.problem = nil
+                                self.loadedLists.insert(resource)
+                                if !self.loaded && self.loadedLists.count == 2 { self.loaded = true }
+                            }
                         } else if let object = event.object {
                             initial?[object.id] = object
                         }
