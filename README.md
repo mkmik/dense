@@ -16,6 +16,12 @@ Milestone 1: the app builds and runs as plain Ghostty, named `Dense.app`,
 with the bundle ID `pub.mkm.dense`. It can run next to Ghostty. It does not
 check for updates, because Ghostty's updates would replace it with Ghostty.
 
+Milestone 2: each window has a sidebar on the left showing the tree of
+Spaces stored in dennet. It updates as soon as a Space changes. It cannot
+change anything yet. dense connects to dennet's socket at
+`~/.local/state/dennet/dennet.sock`; if it can't, the sidebar says why and
+dense keeps trying every two seconds.
+
 ## Build
 
 Needs Zig 0.17 and Xcode 26 (Xcode 26 also runs on macOS 15).
