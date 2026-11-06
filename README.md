@@ -12,7 +12,7 @@ change them.
 
 ## Status
 
-Milestone 1: the app builds and runs as plain Ghostty, named `dense.app`,
+Milestone 1: the app builds and runs as plain Ghostty, named `Dense.app`,
 with the bundle ID `pub.mkm.dense`. It can run next to Ghostty. It does not
 check for updates, because Ghostty's updates would replace it with Ghostty.
 
@@ -21,7 +21,7 @@ check for updates, because Ghostty's updates would replace it with Ghostty.
 Needs Zig 0.17 and Xcode 26 (Xcode 26 also runs on macOS 15).
 
     zig build -Doptimize=ReleaseFast -Dxcframework-target=native
-    open zig-out/dense.app
+    open zig-out/Dense.app
 
 `zig build run` builds a debug app and starts it with logs on stderr.
 
