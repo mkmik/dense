@@ -2,14 +2,26 @@ import Combine
 import Foundation
 import Network
 
-/// One node of the sidebar tree, as stored in dennet (`den.mkm.pub/v1alpha1`, kind Space).
-/// Only the fields the sidebar draws are decoded; other fields are ignored.
-struct Space: Decodable, Equatable {
-    struct Metadata: Decodable, Equatable {
-        var name: String
-        var namespace: String?
-    }
+struct ObjectMeta: Decodable, Equatable {
+    var name: String
+    var namespace: String?
+}
 
+/// An object stored in dennet (`den.mkm.pub/v1alpha1`). Only the fields dense uses are
+/// decoded; other fields are ignored.
+protocol DennetObject: Decodable, Equatable {
+    var metadata: ObjectMeta { get }
+}
+
+extension DennetObject {
+    /// "namespace/name", unique across namespaces.
+    var id: String { objectID(metadata.namespace, metadata.name) }
+}
+
+private func objectID(_ namespace: String?, _ name: String) -> String { "\(namespace ?? "")/\(name)" }
+
+/// One node of the sidebar tree.
+struct Space: DennetObject {
     struct Spec: Decodable, Equatable {
         var parent: String?
         var order: Int32?
@@ -25,13 +37,28 @@ struct Space: Decodable, Equatable {
         var tone: String?
     }
 
-    var metadata: Metadata
+    var metadata: ObjectMeta
     var spec: Spec
+}
 
-    /// "namespace/name", unique across namespaces.
-    var id: String { Self.id(metadata.namespace, metadata.name) }
+/// One tab inside a Space.
+struct Surface: DennetObject {
+    struct Spec: Decodable, Equatable {
+        /// The name of the Space this tab belongs to, in the same namespace.
+        var space: String
+        var order: Int32?
+        var title: String?
+        var kind: String?
+        var terminal: Terminal?
+    }
 
-    static func id(_ namespace: String?, _ name: String) -> String { "\(namespace ?? "")/\(name)" }
+    struct Terminal: Decodable, Equatable {
+        /// The name of the Den to attach to, in the same namespace.
+        var den: String
+    }
+
+    var metadata: ObjectMeta
+    var spec: Spec
 }
 
 extension Space {
@@ -49,7 +76,7 @@ extension Space {
     static func rows(_ spaces: [Space]) -> [Row] {
         let ids = Set(spaces.map(\.id))
         let children = Dictionary(grouping: spaces) { space in
-            let parent = id(space.metadata.namespace, space.spec.parent ?? "")
+            let parent = objectID(space.metadata.namespace, space.spec.parent ?? "")
             return ids.contains(parent) ? parent : ""
         }
         var rows: [Row] = []
@@ -65,52 +92,65 @@ extension Space {
         add("", 0)
         return rows
     }
+
+    /// This space's terminal Surfaces, sorted by order, then name.
+    func terminals(_ surfaces: [Surface]) -> [Surface] {
+        surfaces
+            .filter { $0.metadata.namespace == metadata.namespace && $0.spec.space == metadata.name && $0.spec.terminal != nil }
+            .sorted { ($0.spec.order ?? 0, $0.metadata.name) < ($1.spec.order ?? 0, $1.metadata.name) }
+    }
 }
 
-/// Watches the Spaces in dennet and keeps `spaces` up to date.
+/// Watches the Spaces and Surfaces in dennet and keeps `spaces` and `surfaces` up to date.
 ///
-/// It speaks HTTP/1.0 over dennet's Unix socket. With HTTP/1.0 the server sends the watch
+/// It speaks HTTP/1.0 over dennet's Unix socket. With HTTP/1.0 the server sends a watch
 /// as plain JSON lines, one event per line, and closes the connection when the watch ends.
-/// Each watch starts by sending every existing Space, then a BOOKMARK event; only then is
+/// Each watch starts by sending every existing object, then a BOOKMARK event; only then is
 /// the old list replaced, so a reconnect never shows an empty or half-filled sidebar.
-/// When the connection drops, it reconnects after two seconds.
+/// When a connection drops, it reconnects after two seconds.
 final class SpaceStore: ObservableObject {
     static let shared = SpaceStore(socketPath: NSString(string: "~/.local/state/dennet/dennet.sock").expandingTildeInPath)
 
-    /// Spaces by `Space.id`.
+    /// Spaces by `id`.
     @Published private(set) var spaces: [String: Space] = [:]
 
-    /// Why dennet can't be reached right now, or nil while the watch is running.
+    /// Surfaces by `id`.
+    @Published private(set) var surfaces: [String: Surface] = [:]
+
+    /// Why dennet can't be reached right now, or nil while the watches are running.
     @Published private(set) var problem: String?
 
-    private let socketPath: String
+    let socketPath: String
     private let queue = DispatchQueue(label: "pub.mkm.dense.dennet")
 
     init(socketPath: String) {
         self.socketPath = socketPath
-        queue.async { self.connect() }
+        queue.async {
+            self.watch("spaces", \.spaces)
+            self.watch("surfaces", \.surfaces)
+        }
     }
 
-    private struct WatchEvent: Decodable {
+    private struct WatchEvent<Object: Decodable>: Decodable {
         var type: String
-        /// nil for events that carry no Space, such as BOOKMARK and ERROR.
-        var object: Space?
+        /// nil for events that carry no object of the watched kind, such as BOOKMARK and ERROR.
+        var object: Object?
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             type = try container.decode(String.self, forKey: .type)
-            object = try? container.decode(Space.self, forKey: .object)
+            object = try? container.decode(Object.self, forKey: .object)
         }
 
         enum CodingKeys: CodingKey { case type, object }
     }
 
-    private func connect() {
+    private func watch<Object: DennetObject>(_ resource: String, _ list: ReferenceWritableKeyPath<SpaceStore, [String: Object]>) {
         let conn = NWConnection(to: .unix(path: socketPath), using: .tcp)
         var buffer = Data()
         var streaming = false
         // The full list being rebuilt from the watch's initial events; nil once it is live.
-        var initial: [String: Space]? = [:]
+        var initial: [String: Object]? = [:]
 
         func fail(_ message: String) {
             DispatchQueue.main.async { self.problem = message }
@@ -123,26 +163,26 @@ final class SpaceStore: ObservableObject {
 
                 if !streaming, let end = buffer.range(of: Data("\r\n\r\n".utf8)) {
                     let status = String(decoding: buffer[..<end.lowerBound], as: UTF8.self).prefix { $0 != "\r" }
-                    guard status.contains(" 200 ") else { return fail("dennet: \(status)") }
+                    guard status.contains(" 200 ") else { return fail("dennet \(resource): \(status)") }
                     buffer.removeSubrange(..<end.upperBound)
                     streaming = true
                 }
 
                 while streaming, let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-                    let event = try? JSONDecoder().decode(WatchEvent.self, from: Data(buffer[..<newline]))
+                    let event = try? JSONDecoder().decode(WatchEvent<Object>.self, from: Data(buffer[..<newline]))
                     buffer.removeSubrange(...newline)
                     guard let event else { continue }
-                    if let list = initial {
+                    if let objects = initial {
                         // The first BOOKMARK marks the end of the initial events.
                         if event.type == "BOOKMARK" {
                             initial = nil
-                            DispatchQueue.main.async { self.spaces = list; self.problem = nil }
-                        } else if let space = event.object {
-                            initial?[space.id] = space
+                            DispatchQueue.main.async { self[keyPath: list] = objects; self.problem = nil }
+                        } else if let object = event.object {
+                            initial?[object.id] = object
                         }
-                    } else if let space = event.object {
+                    } else if let object = event.object {
                         let deleted = event.type == "DELETED"
-                        DispatchQueue.main.async { self.spaces[space.id] = deleted ? nil : space }
+                        DispatchQueue.main.async { self[keyPath: list][object.id] = deleted ? nil : object }
                     }
                 }
 
@@ -155,13 +195,13 @@ final class SpaceStore: ObservableObject {
         conn.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                let path = "/apis/den.mkm.pub/v1alpha1/spaces?watch=1&sendInitialEvents=true&allowWatchBookmarks=true&resourceVersionMatch=NotOlderThan"
+                let path = "/apis/den.mkm.pub/v1alpha1/\(resource)?watch=1&sendInitialEvents=true&allowWatchBookmarks=true&resourceVersionMatch=NotOlderThan"
                 conn.send(content: Data("GET \(path) HTTP/1.0\r\nHost: dennet\r\n\r\n".utf8), completion: .idempotent)
                 receive()
             case .waiting(let error), .failed(let error):
                 fail("dennet: \(error) (\(self.socketPath))")
             case .cancelled:
-                self.queue.asyncAfter(deadline: .now() + 2) { self.connect() }
+                self.queue.asyncAfter(deadline: .now() + 2) { self.watch(resource, list) }
             default:
                 break
             }

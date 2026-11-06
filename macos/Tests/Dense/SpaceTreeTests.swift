@@ -26,4 +26,18 @@ struct SpaceTreeTests {
         ])
         #expect(rows.map(\.space.metadata.name) == ["a"])
     }
+
+    @Test func terminalsAreTheSpacesTerminalSurfacesInOrder() {
+        func surface(_ name: String, space: String, order: Int32, den: String? = "d") -> Surface {
+            Surface(metadata: .init(name: name, namespace: "default"),
+                    spec: .init(space: space, order: order, terminal: den.map { .init(den: $0) }))
+        }
+        let surfaces = [
+            surface("second", space: "a", order: 2),
+            surface("first", space: "a", order: 1),
+            surface("other", space: "b", order: 0),
+            surface("browser", space: "a", order: 0, den: nil),
+        ]
+        #expect(space("a").terminals(surfaces).map(\.metadata.name) == ["first", "second"])
+    }
 }

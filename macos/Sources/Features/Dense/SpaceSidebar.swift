@@ -1,22 +1,34 @@
+import AppKit
 import SwiftUI
 
-/// The sidebar on the left of the window: the Space tree from dennet. Read-only for now.
+/// The sidebar on the left of the window: the Space tree from dennet. Clicking a Space
+/// shows its tabs.
 struct SpaceSidebar: View {
     @ObservedObject var store: SpaceStore = .shared
+    @ObservedObject var tabs: SpaceTabs = .shared
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
                 if let problem = store.problem {
                     Text(problem).font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(Space.rows(Array(store.spaces.values))) { row in
                     SpaceRow(space: row.space)
                         .padding(.leading, CGFloat(row.depth) * 14)
+                        .padding(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(row.id == tabs.selected ? Color.accentColor.opacity(0.2) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard let window = NSApp.keyWindow else { return }
+                            tabs.select(row.space, in: window)
+                        }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(6)
         }
         .frame(width: 220)
     }

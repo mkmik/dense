@@ -22,6 +22,12 @@ change anything yet. dense connects to dennet's socket at
 `~/.local/state/dennet/dennet.sock`; if it can't, the sidebar says why and
 dense keeps trying every two seconds.
 
+Milestone 3 (in progress): clicking a Space shows its terminal Surfaces as
+the window's tabs, in `order`. Each tab runs `den attach` for its Den. The
+tabs of the Space you left are hidden, not closed, so going back is
+instant. Plain Ghostty tabs stay where they are. Clicking a Space with no
+terminal Surfaces does nothing yet.
+
 ## Build
 
 Needs Zig 0.17 and Xcode 26 (Xcode 26 also runs on macOS 15).
