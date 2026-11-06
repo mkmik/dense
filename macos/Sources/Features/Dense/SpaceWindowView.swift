@@ -55,7 +55,12 @@ struct SpaceWindowView<Terminal: View>: View {
 private struct NotWindowDraggable<Content: View>: NSViewRepresentable {
     let content: Content
 
-    func makeNSView(context: Context) -> NonDraggableHostingView<Content> { .init(rootView: content) }
+    func makeNSView(context: Context) -> NonDraggableHostingView<Content> {
+        let view = NonDraggableHostingView(rootView: content)
+        // It sits under the titlebar, which would push its content down out of view.
+        if #available(macOS 13.3, *) { view.safeAreaRegions = [] }
+        return view
+    }
     func updateNSView(_ view: NonDraggableHostingView<Content>, context: Context) { view.rootView = content }
 
     /// Only as wide as the content, so the rest of the row still moves the window.
