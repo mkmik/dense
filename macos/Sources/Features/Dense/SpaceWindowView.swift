@@ -28,9 +28,16 @@ struct SpaceWindowView<Terminal: View>: View {
                 // A grey wash over the terminal background, so the tint follows the theme.
                 .background(Color(white: 0.5).opacity(0.15))
             VStack(spacing: 0) {
-                SurfaceTabBar(tabs: tabs, surfaces: tabs.selected.flatMap { store.spaces[$0] }?
-                    .terminals(Array(store.surfaces.values)))
-                    .frame(height: Self.titlebarHeight)
+                HStack(spacing: 0) {
+                    // In the titlebar row a drag moves the window, unless the view under
+                    // the mouse says no. The tabs say no, so they can be dragged instead.
+                    NotWindowDraggable(content: SurfaceTabBar(
+                        tabs: tabs,
+                        surfaces: tabs.selected.flatMap { store.spaces[$0] }?.terminals(Array(store.surfaces.values))))
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .frame(height: Self.titlebarHeight)
                 if tabs.selected != nil && tabs.active == nil {
                     Text(store.loaded ? "No tabs in this Space" : "")
                         .foregroundStyle(.secondary)
@@ -44,18 +51,36 @@ struct SpaceWindowView<Terminal: View>: View {
     }
 }
 
+/// Shows its content in its own hosting view, which does not let a drag on it move the window.
+private struct NotWindowDraggable<Content: View>: NSViewRepresentable {
+    let content: Content
+
+    func makeNSView(context: Context) -> NonDraggableHostingView<Content> { .init(rootView: content) }
+    func updateNSView(_ view: NonDraggableHostingView<Content>, context: Context) { view.rootView = content }
+
+    /// Only as wide as the content, so the rest of the row still moves the window.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NonDraggableHostingView<Content>, context: Context) -> CGSize? {
+        nsView.fittingSize
+    }
+}
+
 /// The Space's tabs, left-aligned in the titlebar row: a terminal icon and title each,
 /// the one in front on a light pill, then a button that makes a new tab. Without a
-/// selected Space the row is empty.
+/// selected Space the row is empty. A tab can be dragged to another place in the row.
 private struct SurfaceTabBar: View {
     @ObservedObject var tabs: SpaceTabs
     let surfaces: [Surface]?
+    /// The tab being dragged, and how far it has moved.
+    @State private var drag: (id: String, dx: CGFloat)?
+    /// The middle of each tab, to work out where a dragged tab lands.
+    @State private var middles: [String: CGFloat] = [:]
 
     var body: some View {
         HStack(spacing: 2) {
             if let surfaces {
                 ForEach(surfaces, id: \.id) { surface in
                     let front = surface.id == tabs.active
+                    let dx = drag?.id == surface.id ? drag?.dx : nil
                     Button { tabs.show(surface) } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "terminal").imageScale(.small)
@@ -68,6 +93,20 @@ private struct SurfaceTabBar: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(front ? .primary : .secondary)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: TabMiddles.self, value: [surface.id: g.frame(in: .named("tabs")).midX])
+                    })
+                    .offset(x: dx ?? 0)
+                    .zIndex(dx == nil ? 0 : 1)
+                    .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named("tabs"))
+                        .onChanged { drag = (surface.id, $0.translation.width) }
+                        .onEnded { value in
+                            // The tab goes after the other tabs whose middle is left of the mouse.
+                            tabs.move(surface.id, to: surfaces.filter {
+                                $0.id != surface.id && middles[$0.id, default: 0] < value.location.x
+                            }.count)
+                            drag = nil
+                        })
                 }
                 Button { tabs.newTab(nil) } label: {
                     Image(systemName: "plus").frame(width: 22, height: 22).contentShape(Rectangle())
@@ -76,9 +115,9 @@ private struct SurfaceTabBar: View {
                 .foregroundStyle(.secondary)
                 .help("New Tab")
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
+        .coordinateSpace(name: "tabs")
+        .onPreferenceChange(TabMiddles.self) { middles = $0 }
     }
 
     /// The Surface's title if it has one, else the terminal's own title.
@@ -91,6 +130,14 @@ private struct SurfaceTabBar: View {
         } else {
             Text(surface.metadata.name)
         }
+    }
+}
+
+private struct TabMiddles: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { $1 }
     }
 }
 

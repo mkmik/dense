@@ -179,13 +179,20 @@ final class SpaceTabs: ObservableObject {
         return true
     }
 
-    /// Ghostty's move_tab: moves the tab in front left (negative) or right, by writing the
-    /// new `order` of the Space's Surfaces to dennet.
+    /// Ghostty's move_tab: moves the tab in front left (negative) or right.
     func moveTab(by amount: Int) -> Bool {
+        guard let active, let from = tabs.firstIndex(where: { $0.id == active }) else { return false }
+        move(active, to: from + amount)
+        return true
+    }
+
+    /// Moves a tab to a place in the tab bar, by writing the new `order` of the Space's
+    /// Surfaces to dennet.
+    func move(_ id: String, to index: Int) {
         var tabs = self.tabs
-        guard let from = tabs.firstIndex(where: { $0.id == active }) else { return false }
-        let to = min(max(from + amount, 0), tabs.count - 1)
-        guard to != from else { return true }
+        guard let from = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let to = min(max(index, 0), tabs.count - 1)
+        guard to != from else { return }
         tabs.insert(tabs.remove(at: from), at: to)
 
         Task { @MainActor in
@@ -199,7 +206,6 @@ final class SpaceTabs: ObservableObject {
                 self.alert("Could not move the tab", error)
             }
         }
-        return true
     }
 
     private struct Created: Decodable {

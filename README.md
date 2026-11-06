@@ -39,7 +39,8 @@ AppleScript, Shortcuts, Services, dropping on the Dock icon):
   starts the den with `den apply` (dennet does not start dens yet), and
   shows the tab. It opens in the current tab's directory.
 - go to tab N, next, previous, last: switches tabs.
-- move tab: writes the new `order` of the Space's Surfaces to dennet.
+- move tab, or dragging a tab along the tab bar: writes the new `order` of
+  the Space's Surfaces to dennet.
 - close tab: as above, detaches the tab; the Den and Surface stay.
 
 A tab whose Surface has no `title` shows the terminal's own title.
