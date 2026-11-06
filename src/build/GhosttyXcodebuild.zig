@@ -164,10 +164,11 @@ pub fn init(
 
     // Our step to copy the app bundle to the install path.
     // We have to use `cp -R` because there are symlinks in the
-    // bundle.
+    // bundle. dense: the old bundle is removed first, because macOS kills
+    // a signed binary that was overwritten in place when it next starts.
     const copy = copy: {
         const step = RunStep.create(b, "copy app bundle");
-        step.addArgs(&.{ "cp", "-R" });
+        step.addArgs(&.{ "/bin/sh", "-c", "rm -rf \"$2/$(basename \"$1\")\" && cp -R \"$1\" \"$2\"", "sh" });
         step.addFileArg(b.path(app_path));
         step.addDirectoryArg2(b.graph.path(.install_prefix, ""), .{});
         step.step.dependOn(&build.step);
