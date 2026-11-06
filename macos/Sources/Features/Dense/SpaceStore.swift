@@ -166,6 +166,7 @@ final class SpaceStore: ObservableObject {
         return try await withCheckedThrowingContinuation { continuation in
             let conn = NWConnection(to: .unix(path: socketPath), using: .tcp)
             var response = Data()
+            var ready = false
             var finished = false
 
             func finish(_ result: Result<Data, Error>) {
@@ -198,12 +199,16 @@ final class SpaceStore: ObservableObject {
             conn.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
+                    ready = true
                     var head = "\(method) \(path) HTTP/1.0\r\nHost: dennet\r\n"
                     if let payload { head += "Content-Type: \(contentType)\r\nContent-Length: \(payload.count)\r\n" }
                     conn.send(content: Data((head + "\r\n").utf8) + (payload ?? Data()), completion: .idempotent)
                     receive()
                 case .waiting(let error), .failed(let error):
-                    finish(.failure(error))
+                    // Once connected, receive() reports how it ended. dennet closing the
+                    // connection after the response can show up here first, as a failure
+                    // ("Network is down"), while the whole response is still to be read.
+                    if !ready { finish(.failure(error)) }
                 default:
                     break
                 }
