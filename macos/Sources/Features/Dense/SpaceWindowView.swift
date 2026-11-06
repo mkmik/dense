@@ -36,7 +36,7 @@ struct SpaceWindowView<Terminal: View>: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    terminal
+                    terminal.padding(.leading, 8)
                 }
             }
         }
