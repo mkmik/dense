@@ -6,6 +6,10 @@ struct SpaceSidebar: View {
     @ObservedObject var store: SpaceStore = .shared
     @ObservedObject var tabs: SpaceTabs
 
+    /// The fill of the selected row: the terminal's background, so it stands out from the
+    /// tinted sidebar.
+    let selection: Color
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
@@ -15,18 +19,23 @@ struct SpaceSidebar: View {
                 ForEach(Space.rows(Array(store.spaces.values))) { row in
                     SpaceRow(space: row.space)
                         .padding(.leading, CGFloat(row.depth) * 14)
-                        .padding(4)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(row.id == tabs.selected ? Color.accentColor.opacity(0.2) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 5))
+                        .background {
+                            if row.id == tabs.selected {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(selection)
+                                    .shadow(color: .black.opacity(0.1), radius: 1, y: 0.5)
+                            }
+                        }
                         .contentShape(Rectangle())
                         .onTapGesture { tabs.select(row.space) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(6)
+            .padding(.horizontal, 8)
         }
-        .frame(width: 220)
     }
 }
 

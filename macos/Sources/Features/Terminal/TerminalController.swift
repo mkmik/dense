@@ -7,34 +7,9 @@ import GhosttyKit
 /// A classic, tabbed terminal experience.
 class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Controller {
     override var windowNibName: NSNib.Name? {
-        let defaultValue = "Terminal"
-
-        guard let appDelegate = NSApp.delegate as? AppDelegate else { return defaultValue }
-        let config = appDelegate.ghostty.config
-
-        // If we have no window decorations, there's no reason to do anything but
-        // the default titlebar (because there will be no titlebar).
-        if !config.windowDecorations {
-            return defaultValue
-        }
-
-        let nib = switch config.macosTitlebarStyle {
-        case .native: "Terminal"
-        case .hidden: "TerminalHiddenTitlebar"
-        case .transparent: "TerminalTransparentTitlebar"
-        case .tabs:
-#if compiler(>=6.2)
-            if #available(macOS 26.0, *) {
-                "TerminalTabsTitlebarTahoe"
-            } else {
-                "TerminalTabsTitlebarVentura"
-            }
-#else
-            "TerminalTabsTitlebarVentura"
-#endif
-        }
-
-        return nib
+        // dense: always the plain window. dense draws its own titlebar row (see
+        // SpaceWindowView), so macos-titlebar-style does not apply.
+        "Terminal"
     }
 
     /// This is set to true when we care about frame changes. This is a small optimization since
@@ -1129,7 +1104,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         // Initialize our content view to the SwiftUI root
         let container = TerminalViewContainer {
-            SpaceWindowView(tabs: spaceTabs) {
+            SpaceWindowView(ghostty: ghostty, tabs: spaceTabs) {
                 TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
             }
         }
@@ -1141,6 +1116,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         container.initialContentSize = focusedSurface?.initialSize
 
         window.contentView = container
+
+        // dense: the content runs under a transparent titlebar, like Rex, so the sidebar
+        // reaches the top of the window and the tabs sit next to the window buttons.
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
 
         // If we have a default size, we want to apply it.
         if let defaultSize {

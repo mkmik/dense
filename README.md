@@ -65,6 +65,9 @@ User themes go in `~/.config/dense/themes/`. These folders are set in
 libghostty (`src/config/file_load.zig`, `src/config/theme.zig`,
 `src/os/macos.zig`).
 
+`macos-titlebar-style` has no effect: dense always draws its own titlebar
+row, with the tabs next to the window buttons.
+
 ## Following Ghostty
 
 This repository holds Ghostty's full history, and dense's changes sit on top
