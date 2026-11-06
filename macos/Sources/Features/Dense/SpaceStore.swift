@@ -149,6 +149,82 @@ final class SpaceStore: ObservableObject {
         enum CodingKeys: CodingKey { case type, object }
     }
 
+    struct RequestError: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// Sends one request to dennet and returns the response body. A status other than 2xx
+    /// throws, with dennet's message when it sent one.
+    func request(
+        _ method: String,
+        _ path: String,
+        json body: [String: Any]? = nil,
+        contentType: String = "application/json"
+    ) async throws -> Data {
+        let payload = try body.map { try JSONSerialization.data(withJSONObject: $0) }
+        return try await withCheckedThrowingContinuation { continuation in
+            let conn = NWConnection(to: .unix(path: socketPath), using: .tcp)
+            var response = Data()
+            var finished = false
+
+            func finish(_ result: Result<Data, Error>) {
+                guard !finished else { return }
+                finished = true
+                conn.cancel()
+                continuation.resume(with: result)
+            }
+
+            func receive() {
+                conn.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { data, _, done, error in
+                    if let data { response.append(data) }
+                    if let error { return finish(.failure(error)) }
+                    guard done else { return receive() }
+
+                    // HTTP/1.0: the server closes the connection after the body.
+                    guard let end = response.range(of: Data("\r\n\r\n".utf8)) else {
+                        return finish(.failure(RequestError(message: "dennet sent no response")))
+                    }
+                    let status = String(decoding: response[..<end.lowerBound], as: UTF8.self).prefix { $0 != "\r" }
+                    let body = Data(response[end.upperBound...])
+                    guard status.split(separator: " ").dropFirst().first?.hasPrefix("2") == true else {
+                        let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+                        return finish(.failure(RequestError(message: json?["message"] as? String ?? "dennet: \(status)")))
+                    }
+                    finish(.success(body))
+                }
+            }
+
+            conn.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    var head = "\(method) \(path) HTTP/1.0\r\nHost: dennet\r\n"
+                    if let payload { head += "Content-Type: \(contentType)\r\nContent-Length: \(payload.count)\r\n" }
+                    conn.send(content: Data((head + "\r\n").utf8) + (payload ?? Data()), completion: .idempotent)
+                    receive()
+                case .waiting(let error), .failed(let error):
+                    finish(.failure(error))
+                default:
+                    break
+                }
+            }
+            conn.start(queue: queue)
+        }
+    }
+
+    /// Creates an object and returns it as dennet stored it.
+    func create<T: Decodable>(
+        _ resource: String,
+        kind: String,
+        namespace: String,
+        metadata: [String: Any],
+        spec: [String: Any]
+    ) async throws -> T {
+        let body: [String: Any] = ["apiVersion": "den.mkm.pub/v1alpha1", "kind": kind, "metadata": metadata, "spec": spec]
+        let data = try await request("POST", "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)/\(resource)", json: body)
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
     private func watch<Object: DennetObject>(_ resource: String, _ list: ReferenceWritableKeyPath<SpaceStore, [String: Object]>) {
         let conn = NWConnection(to: .unix(path: socketPath), using: .tcp)
         var buffer = Data()

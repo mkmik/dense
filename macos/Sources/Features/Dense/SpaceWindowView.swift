@@ -32,7 +32,8 @@ struct SpaceWindowView<Terminal: View>: View {
     }
 }
 
-/// A row of equal-width tabs, one per Surface, in the style of the macOS tab bar.
+/// A row of equal-width tabs, one per Surface, in the style of the macOS tab bar, and a
+/// button that makes a new tab.
 private struct SurfaceTabBar: View {
     @ObservedObject var tabs: SpaceTabs
     let surfaces: [Surface]
@@ -41,7 +42,7 @@ private struct SurfaceTabBar: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(surfaces, id: \.id) { surface in
-                    Text(surface.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? surface.metadata.name)
+                    title(surface)
                         .lineLimit(1)
                         .padding(.horizontal, 8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -50,9 +51,36 @@ private struct SurfaceTabBar: View {
                         .onTapGesture { tabs.show(surface) }
                     Divider()
                 }
+                Button { tabs.newTab(nil) } label: {
+                    Image(systemName: "plus").frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("New Tab")
             }
             .frame(height: 28)
             Divider()
         }
+    }
+
+    /// The Surface's title if it has one, else the terminal's own title.
+    @ViewBuilder
+    private func title(_ surface: Surface) -> some View {
+        if let title = surface.spec.title, !title.isEmpty {
+            Text(title)
+        } else if let view = tabs.terminal(for: surface) {
+            TerminalTitle(view: view, fallback: surface.metadata.name)
+        } else {
+            Text(surface.metadata.name)
+        }
+    }
+}
+
+private struct TerminalTitle: View {
+    @ObservedObject var view: Ghostty.SurfaceView
+    let fallback: String
+
+    var body: some View {
+        // Ghostty shows 👻 while a terminal has not set a title.
+        Text(view.title.isEmpty || view.title == "👻" ? fallback : view.title)
     }
 }

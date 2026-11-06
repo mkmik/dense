@@ -422,6 +422,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         from parent: NSWindow? = nil,
         withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil
     ) -> TerminalController? {
+        // dense: there are no macOS window tabs. A new tab is a new Surface in the
+        // parent window's Space. Every new-tab path (key binding, menu, AppleScript,
+        // Shortcuts, Services, Dock) comes through here.
+        if let parentController = parent?.windowController as? TerminalController {
+            parentController.spaceTabs.newTab(baseConfig)
+            return parentController
+        }
+
         // Making sure that we're dealing with a TerminalController. If not,
         // then we just create a new window.
         guard let parent,
@@ -1331,6 +1339,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     @IBAction func closeTab(_ sender: Any?) {
+        // dense: close the Space's tab, not the window.
+        if spaceTabs.closeActiveTab() { return }
+
         guard let window = window else { return }
         guard window.tabGroup?.windows.count ?? 0 > 1 else {
             closeWindow(sender)

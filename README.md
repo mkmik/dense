@@ -31,6 +31,19 @@ attaches again. dense remembers the selected Space and each Space's front
 tab (in its user defaults), and a new window opens on them. The plain
 terminal a window starts with is closed as soon as a tab is shown.
 
+There are no macOS window tabs. Ghostty's tab commands act on the Space's
+tabs, wherever they come from (key bindings, menus, the command palette,
+AppleScript, Shortcuts, Services, dropping on the Dock icon):
+
+- new tab, and the + in the tab bar: creates a Den and a Surface in dennet,
+  starts the den with `den apply` (dennet does not start dens yet), and
+  shows the tab. It opens in the current tab's directory.
+- go to tab N, next, previous, last: switches tabs.
+- move tab: writes the new `order` of the Space's Surfaces to dennet.
+- close tab: as above, detaches the tab; the Den and Surface stay.
+
+A tab whose Surface has no `title` shows the terminal's own title.
+
 ## Build
 
 Needs Zig 0.17 and Xcode 26 (Xcode 26 also runs on macOS 15).

@@ -1274,6 +1274,12 @@ extension Ghostty {
                     guard let surface = target.target.surface else { return false }
                     guard let surfaceView = self.surfaceView(from: surface) else { return false }
 
+                    // dense: a Space's tabs are inside its window.
+                    if let tabs = (surfaceView.window?.windowController as? TerminalController)?.spaceTabs,
+                       tabs.selected != nil {
+                        return tabs.moveTab(by: Int(move.amount))
+                    }
+
                     // See gotoTab for notes on this check.
                     guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
 
@@ -1329,6 +1335,12 @@ extension Ghostty {
                 case GHOSTTY_TARGET_SURFACE:
                     guard let surface = target.target.surface else { return false }
                     guard let surfaceView = self.surfaceView(from: surface) else { return false }
+
+                    // dense: a Space's tabs are inside its window.
+                    if let tabs = (surfaceView.window?.windowController as? TerminalController)?.spaceTabs,
+                       tabs.selected != nil {
+                        return tabs.gotoTab(tab)
+                    }
 
                     // Similar to goto_split (see comment there) about our performability,
                     // we should make this more accurate later.
