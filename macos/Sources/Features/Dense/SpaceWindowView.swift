@@ -61,12 +61,19 @@ struct SpaceWindowView<Terminal: View>: View {
                 }
             }
         }
+        // The theme's background under everything, the same color the selected row
+        // uses. The window's own background follows the focused terminal, and with no
+        // terminal it can stay white.
+        // ponytail: with background-opacity below 1 the terminal area gets the
+        // opacity twice; draw this only outside the terminal if that bothers anyone.
+        .background(ghostty.config.backgroundColor.opacity(ghostty.config.backgroundOpacity))
         .ignoresSafeArea(.container, edges: .top)
     }
 
     /// What a Space shows when it has no terminal to show.
     private var placeholder: String {
-        guard store.loaded else { return "" }
+        // Blank while the Space is not there, as when its Host has not answered yet.
+        guard store.loaded, tabs.selected.flatMap({ store.spaces[$0] }) != nil else { return "" }
         guard let active = tabs.active else { return "No tabs in this Space" }
         switch store.surfaces[active].flatMap(store.den(of:))?.status?.phase {
         case nil, "Pending", "Running": return "This den is not running yet"

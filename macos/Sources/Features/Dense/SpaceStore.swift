@@ -78,11 +78,29 @@ struct Den: DennetObject {
     var running: Bool { status?.phase == "Running" && status?.socket?.isEmpty == false }
 }
 
+/// Another machine running dennet. Cluster-scoped: its objects show up here in the
+/// namespace named after it. Named so as not to clash with Foundation's Host.
+struct DennetHost: DennetObject {
+    struct Spec: Decodable, Equatable {
+        /// The ssh destination: [user@]host, an alias from ~/.ssh/config, or ssh://...
+        var ssh: String
+        /// The dennet socket there, if not where dennet puts it by default.
+        var socketPath: String?
+        /// den there; without it, den is found on the PATH of a login, interactive shell there.
+        var denPath: String?
+    }
+
+    var metadata: ObjectMeta
+    var spec: Spec
+}
+
 extension Space {
-    /// A sidebar row: a space and how deep it sits in the tree.
+    /// A sidebar row: a space, how deep it sits in the tree, and the id of the row it sits
+    /// under ("" at the top level). Rows with the same parent are siblings.
     struct Row: Identifiable, Equatable {
         let space: Space
         let depth: Int
+        let parent: String
         var id: String { space.id }
     }
 
@@ -102,7 +120,7 @@ extension Space {
                 ($0.spec.order ?? 0, $0.metadata.name) < ($1.spec.order ?? 0, $1.metadata.name)
             }
             for space in sorted {
-                rows.append(Row(space: space, depth: depth))
+                rows.append(Row(space: space, depth: depth, parent: parent))
                 if space.spec.collapsed != true { add(space.id, depth + 1) }
             }
         }
@@ -121,6 +139,10 @@ extension Space {
 /// Watches the Spaces, Surfaces and Dens in dennet and keeps `spaces`, `surfaces` and
 /// `dens` up to date.
 ///
+/// dennet's lists across all namespaces have only this machine's objects. So for each
+/// Host it also watches the Host's namespace, which dennet forwards to that machine, and
+/// stops when the Host goes away.
+///
 /// It speaks HTTP/1.0 over dennet's Unix socket. With HTTP/1.0 the server sends a watch
 /// as plain JSON lines, one event per line, and closes the connection when the watch ends.
 /// Each watch starts by sending every existing object, then a BOOKMARK event; only then is
@@ -138,12 +160,53 @@ final class SpaceStore: ObservableObject {
     /// Dens by `id`.
     @Published private(set) var dens: [String: Den] = [:]
 
+    /// Hosts by `id`.
+    @Published private(set) var hosts: [String: DennetHost] = [:] {
+        didSet {
+            let names = Set(hosts.values.map(\.metadata.name))
+            queue.async { self.watchHosts(names) }
+        }
+    }
+
     /// Why dennet can't be reached right now, or nil while the watches are running.
     @Published private(set) var problem: String?
+
+    /// Why a Host can't be reached right now, by Host name.
+    @Published private(set) var hostProblems: [String: String] = [:]
+
+    /// The names of the Hosts, sorted.
+    var hostNames: [String] { hosts.values.map(\.metadata.name).sorted() }
+
+    /// The Spaces on a Host, or on this machine for nil.
+    func spaces(on host: String?) -> [Space] {
+        let names = Set(hosts.values.map(\.metadata.name))
+        return spaces.values.filter { space in
+            guard let host else { return !names.contains(space.metadata.namespace ?? "default") }
+            return space.metadata.namespace == host
+        }
+    }
+
+    /// The ids each watch put in its list, by watch key ("namespace/resource", "*" for
+    /// all namespaces), so a watch replaces only its own objects. Main thread only.
+    private var owned: [String: Set<String>] = [:]
+
+    /// The open watch connections by key, and the Hosts being watched. Queue only.
+    private var connections: [String: NWConnection] = [:]
+    private var watchedHosts: Set<String> = []
 
     /// True once all the lists have arrived from dennet for the first time.
     @Published private(set) var loaded = false
     private var loadedLists: Set<String> = []
+
+    /// The Hosts whose lists have all arrived, and each Host's lists so far.
+    @Published private(set) var loadedHosts: Set<String> = []
+    private var hostLoadedLists: [String: Set<String>] = [:]
+
+    /// Whether the lists for a Space's machine have arrived, so it shows all its tabs.
+    func loaded(_ space: Space) -> Bool {
+        let namespace = space.metadata.namespace ?? "default"
+        return hosts.values.contains { $0.metadata.name == namespace } ? loadedHosts.contains(namespace) : loaded
+    }
 
     let socketPath: String
     private let queue = DispatchQueue(label: "pub.mkm.dense.dennet")
@@ -154,7 +217,34 @@ final class SpaceStore: ObservableObject {
             self.watch("spaces", \.spaces)
             self.watch("surfaces", \.surfaces)
             self.watch("dens", \.dens)
+            self.watch("hosts", \.hosts)
         }
+    }
+
+    /// Starts watching new Hosts' namespaces and stops watching gone ones. On the queue.
+    private func watchHosts(_ names: Set<String>) {
+        for gone in watchedHosts.subtracting(names) {
+            for resource in ["spaces", "surfaces", "dens"] { connections["\(gone)/\(resource)"]?.cancel() }
+            DispatchQueue.main.async {
+                for resource in ["spaces", "surfaces", "dens"] {
+                    let ids = self.owned.removeValue(forKey: "\(gone)/\(resource)") ?? []
+                    for id in ids {
+                        self.spaces[id] = nil
+                        self.surfaces[id] = nil
+                        self.dens[id] = nil
+                    }
+                }
+                self.hostProblems[gone] = nil
+                self.hostLoadedLists[gone] = nil
+                self.loadedHosts.remove(gone)
+            }
+        }
+        for new in names.subtracting(watchedHosts) {
+            watch("spaces", in: new, \.spaces)
+            watch("surfaces", in: new, \.surfaces)
+            watch("dens", in: new, \.dens)
+        }
+        watchedHosts = names
     }
 
     /// The Den a terminal Surface attaches to, if dennet has it.
@@ -257,15 +347,24 @@ final class SpaceStore: ObservableObject {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private func watch<Object: DennetObject>(_ resource: String, _ list: ReferenceWritableKeyPath<SpaceStore, [String: Object]>) {
+    /// Watches one resource, in all namespaces or in a Host's namespace. On the queue.
+    private func watch<Object: DennetObject>(
+        _ resource: String,
+        in host: String? = nil,
+        _ list: ReferenceWritableKeyPath<SpaceStore, [String: Object]>
+    ) {
+        let key = "\(host ?? "*")/\(resource)"
         let conn = NWConnection(to: .unix(path: socketPath), using: .tcp)
+        connections[key] = conn
         var buffer = Data()
         var streaming = false
         // The full list being rebuilt from the watch's initial events; nil once it is live.
         var initial: [String: Object]? = [:]
 
         func fail(_ message: String) {
-            DispatchQueue.main.async { self.problem = message }
+            DispatchQueue.main.async {
+                if let host { self.hostProblems[host] = message } else { self.problem = message }
+            }
             conn.cancel()
         }
 
@@ -289,10 +388,20 @@ final class SpaceStore: ObservableObject {
                         if event.type == "BOOKMARK" {
                             initial = nil
                             DispatchQueue.main.async {
-                                self[keyPath: list] = objects
-                                self.problem = nil
-                                self.loadedLists.insert(resource)
-                                if !self.loaded && self.loadedLists.count == 3 { self.loaded = true }
+                                var all = self[keyPath: list]
+                                for id in self.owned[key] ?? [] { all[id] = nil }
+                                all.merge(objects) { $1 }
+                                self.owned[key] = Set(objects.keys)
+                                self[keyPath: list] = all
+                                if let host {
+                                    self.hostProblems[host] = nil
+                                    self.hostLoadedLists[host, default: []].insert(resource)
+                                    if self.hostLoadedLists[host]?.count == 3 { self.loadedHosts.insert(host) }
+                                } else {
+                                    self.problem = nil
+                                    self.loadedLists.insert(resource)
+                                    if !self.loaded && self.loadedLists.count == 4 { self.loaded = true }
+                                }
                             }
                         } else if let object = event.object {
                             initial?[object.id] = object
@@ -302,6 +411,7 @@ final class SpaceStore: ObservableObject {
                         DispatchQueue.main.async {
                             // A Den's status changes often in fields dense doesn't read.
                             let new = deleted ? nil : object
+                            if deleted { self.owned[key]?.remove(object.id) } else { self.owned[key, default: []].insert(object.id) }
                             if self[keyPath: list][object.id] != new { self[keyPath: list][object.id] = new }
                         }
                     }
@@ -316,13 +426,19 @@ final class SpaceStore: ObservableObject {
         conn.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                let path = "/apis/den.mkm.pub/v1alpha1/\(resource)?watch=1&sendInitialEvents=true&allowWatchBookmarks=true&resourceVersionMatch=NotOlderThan"
+                let scope = host.map { "namespaces/\($0)/" } ?? ""
+                let path = "/apis/den.mkm.pub/v1alpha1/\(scope)\(resource)?watch=1&sendInitialEvents=true&allowWatchBookmarks=true&resourceVersionMatch=NotOlderThan"
                 conn.send(content: Data("GET \(path) HTTP/1.0\r\nHost: dennet\r\n\r\n".utf8), completion: .idempotent)
                 receive()
             case .waiting(let error), .failed(let error):
                 fail("dennet: \(error) (\(self.socketPath))")
             case .cancelled:
-                self.queue.asyncAfter(deadline: .now() + 2) { self.watch(resource, list) }
+                // Reconnect, unless the Host is gone or another watch has taken over.
+                if self.connections[key] === conn { self.connections[key] = nil }
+                self.queue.asyncAfter(deadline: .now() + 2) {
+                    guard self.connections[key] == nil, host.map(self.watchedHosts.contains) ?? true else { return }
+                    self.watch(resource, in: host, list)
+                }
             default:
                 break
             }

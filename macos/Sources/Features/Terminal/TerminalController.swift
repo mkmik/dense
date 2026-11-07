@@ -628,9 +628,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     override func syncAppearance() {
         // When our focus changes, we update our window appearance based on the
-        // currently focused surface.
-        guard let focusedSurface else { return }
-        syncAppearance(focusedSurface.derivedConfig)
+        // currently focused surface. dense: a window can show a Space with no
+        // terminal, even as it opens; then the app config sets the window's background,
+        // or it would keep the system's white or dark one.
+        syncAppearance(focusedSurface?.derivedConfig ?? .init(ghostty.config))
     }
 
     private func syncAppearance(_ surfaceConfig: Ghostty.SurfaceView.DerivedConfig) {
@@ -1519,7 +1520,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         // When our focus changes, we update our window appearance based on the
         // currently focused surface.
-        guard let focusedSurface else { return }
+        guard let focusedSurface else { return syncAppearance() }
         syncAppearance(focusedSurface.derivedConfig)
 
         // We also want to get notified of certain changes to update our appearance.

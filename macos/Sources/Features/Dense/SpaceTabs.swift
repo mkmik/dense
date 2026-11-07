@@ -52,11 +52,23 @@ final class SpaceTabs: ObservableObject {
         lastTab = defaults.dictionary(forKey: Self.lastTabKey) as? [String: String] ?? [:]
 
         // Show the saved Space right away (no terminal yet, so the window's own terminal
-        // doesn't flash), and its tab once dennet's lists are in.
-        selected = defaults.string(forKey: Self.selectedKey)
-        restore = SpaceStore.shared.$loaded.first { $0 }.receive(on: DispatchQueue.main).sink { [weak self] _ in
-            guard let self, let id = self.selected else { return }
-            if let space = SpaceStore.shared.spaces[id] { self.select(space) } else { self.selected = nil }
+        // doesn't flash), and its tab once the lists of its machine are in. A Host's lists
+        // come after this machine's, so once this machine's are in, the window's own
+        // terminal is dropped and the window stays blank until the Space turns up. It
+        // stays blank if the Space never does, until another Space is picked.
+        let saved = defaults.string(forKey: Self.selectedKey)
+        selected = saved
+        let store = SpaceStore.shared
+        restore = store.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            guard let self, store.loaded else { return }
+            // Nothing was saved, or another Space has been picked since.
+            guard let saved, self.selected == saved else { return self.restore = nil }
+            if let space = store.spaces[saved], store.loaded(space) {
+                self.restore = nil
+                self.select(space)
+            } else if self.active == nil, self.controller?.surfaceTree.isEmpty == false {
+                self.show(nil)
+            }
         }
 
         // A waiting tab attaches as soon as its den runs.
@@ -213,6 +225,84 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
+    /// Asks, in a sheet like Ghostty's close confirmations, then deletes a Space from
+    /// dennet with its subspaces, their tabs (Surfaces) and the Dens those attach to, which
+    /// ends their terminal sessions. dennet does not delete dependent objects itself.
+    func deleteSpace(_ space: Space) {
+        let store = SpaceStore.shared
+        let namespace = space.metadata.namespace ?? "default"
+
+        // The Space and everything under it, parents first. The seen check stops at
+        // parents that form a loop.
+        var doomed = [space]
+        var seen: Set = [space.id]
+        var i = 0
+        while i < doomed.count {
+            let parent = doomed[i]
+            doomed += store.spaces.values.filter {
+                $0.metadata.namespace == parent.metadata.namespace && $0.spec.parent == parent.metadata.name
+                    && seen.insert($0.id).inserted
+            }
+            i += 1
+        }
+        let surfaces = doomed.flatMap { $0.terminals(Array(store.surfaces.values)) }
+        let ids = seen
+
+        let alert = NSAlert()
+        alert.messageText = "Delete \"\(space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name)\"?"
+        var gone: [String] = []
+        if doomed.count > 1 { gone.append(doomed.count == 2 ? "1 subspace" : "\(doomed.count - 1) subspaces") }
+        if !surfaces.isEmpty { gone.append(surfaces.count == 1 ? "1 tab" : "\(surfaces.count) tabs") }
+        alert.informativeText = gone.isEmpty
+            ? "This cannot be undone."
+            : "Its \(gone.joined(separator: " and ")) will be deleted too, and their terminal sessions will be terminated."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+
+        let delete = { [weak self] (response: NSApplication.ModalResponse) in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            // As in Ghostty: keeps focus right when Stage Manager is used (#8336).
+            alert.window.orderOut(nil)
+
+            Task { @MainActor in
+                let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)"
+                do {
+                    for surface in surfaces {
+                        _ = try await store.request("DELETE", "\(root)/surfaces/\(surface.metadata.name)")
+                        // A Den that has already gone is not an error.
+                        if let den = store.den(of: surface) {
+                            _ = try await store.request("DELETE", "\(root)/dens/\(den.metadata.name)")
+                        }
+                        self.trees[surface.id] = nil
+                    }
+                    // Children first, so no subspace shows at the top level for a moment.
+                    for space in doomed.reversed() {
+                        _ = try await store.request("DELETE", "\(root)/spaces/\(space.metadata.name)")
+                    }
+                } catch {
+                    self.alert("Could not delete the Space", error)
+                    return
+                }
+                // Move off the Space, dropping its tab in front. dennet's watch may not
+                // have reported the deletes yet.
+                guard let selected = self.selected, ids.contains(selected) else { return }
+                self.active = nil
+                if let next = Space.rows(store.spaces.values.filter { !ids.contains($0.id) }).first {
+                    self.select(next.space)
+                } else {
+                    self.selected = nil
+                    self.show(nil)
+                }
+            }
+        }
+        if let window = controller?.window {
+            alert.beginSheetModal(for: window, completionHandler: delete)
+        } else {
+            delete(alert.runModal())
+        }
+    }
+
     /// Ghostty's goto_tab: a tab number from 1, or previous, next or last. Returns false
     /// when there is no tab to go to.
     func gotoTab(_ tab: ghostty_action_goto_tab_e) -> Bool {
@@ -248,15 +338,32 @@ final class SpaceTabs: ObservableObject {
         guard to != from else { return }
         tabs.insert(tabs.remove(at: from), at: to)
 
+        writeOrder("surfaces", tabs.map { ($0.metadata, $0.spec.order) }, failure: "Could not move the tab")
+    }
+
+    /// Moves a Space to a place among its siblings (in sidebar order), by writing the new
+    /// `order` of the siblings to dennet. Its parent stays the same.
+    func moveSpace(_ id: String, among siblings: [Space], to index: Int) {
+        var siblings = siblings
+        guard let from = siblings.firstIndex(where: { $0.id == id }) else { return }
+        let to = min(max(index, 0), siblings.count - 1)
+        guard to != from else { return }
+        siblings.insert(siblings.remove(at: from), at: to)
+        writeOrder("spaces", siblings.map { ($0.metadata, $0.spec.order) }, failure: "Could not move the Space")
+    }
+
+    /// Numbers objects 10, 20, 30... in the given order, patching only those whose `order`
+    /// changes.
+    private func writeOrder(_ resource: String, _ objects: [(ObjectMeta, Int32?)], failure: String) {
         Task { @MainActor in
             do {
-                for (i, surface) in tabs.enumerated() where surface.spec.order != Int32((i + 1) * 10) {
-                    let path = "/apis/den.mkm.pub/v1alpha1/namespaces/\(surface.metadata.namespace ?? "default")/surfaces/\(surface.metadata.name)"
+                for (i, (meta, order)) in objects.enumerated() where order != Int32((i + 1) * 10) {
+                    let path = "/apis/den.mkm.pub/v1alpha1/namespaces/\(meta.namespace ?? "default")/\(resource)/\(meta.name)"
                     _ = try await SpaceStore.shared.request(
                         "PATCH", path, json: ["spec": ["order": (i + 1) * 10]], contentType: "application/merge-patch+json")
                 }
             } catch {
-                self.alert("Could not move the tab", error)
+                self.alert(failure, error)
             }
         }
     }
@@ -276,9 +383,20 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
+    /// The rows and columns of a terminal already open in this window that fills the tab
+    /// area, the one in front first. A new tab gets the same size.
+    private func tabSize(_ controller: TerminalController) -> (rows: UInt16, columns: UInt16)? {
+        for tree in [controller.surfaceTree] + Array(trees.values) {
+            if case let .leaf(view) = tree.root, let size = view.surfaceSize { return (size.rows, size.columns) }
+        }
+        return nil
+    }
+
     private func makeView(_ surface: Surface, controller: TerminalController) -> Ghostty.SurfaceView {
         var config = Ghostty.SurfaceConfiguration()
-        config.command = Self.attachCommand(namespace: surface.metadata.namespace ?? "default", den: surface.spec.terminal?.den ?? "")
+        config.command = Self.attachCommand(
+            namespace: surface.metadata.namespace ?? "default", den: surface.spec.terminal?.den ?? "",
+            size: tabSize(controller))
         config.initialInput = pendingInput.removeValue(forKey: surface.id)
         guard let app = controller.ghostty.app else { preconditionFailure("app must be loaded") }
         return Ghostty.SurfaceView(app, baseConfig: config)
@@ -288,16 +406,92 @@ final class SpaceTabs: ObservableObject {
         "http://dennet/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)/dens/\(den)"
     }
 
-    /// The command a terminal tab runs.
+    /// The command a terminal tab runs. A Den on a Host is attached on that Host: ssh
+    /// runs den there, against the dennet there, where the Den is in "default".
     ///
     /// A new Ghostty surface starts at a fixed 800x600 pixels (about 50 columns) and gets its
     /// real size a moment later, after layout. If den attach started at once, den would
     /// shrink the session to 50 columns and rewrap everything on screen. So a small sh
-    /// script waits for the first resize (SIGWINCH), or half a second, before starting den.
-    /// `env` keeps sh from becoming a login shell: Ghostty starts commands with `exec -l`.
-    static func attachCommand(namespace: String, den: String) -> String {
-        let waitForSize = #"trap : WINCH; sleep 0.5 & wait $!; kill $! 2>/dev/null; exec "$0" "$@""#
-        return "/usr/bin/env /bin/sh -c '\(waitForSize)' '\(denPath)' attach --unix-socket '\(SpaceStore.shared.socketPath)' -f '\(denURL(namespace, den))'"
+    /// script waits for the first resize (SIGWINCH), or half a second, before starting den
+    /// (or ssh). The resize can come before the script listens for it, so when `size` (that
+    /// of another tab in the window) is given and the terminal already has it, the script
+    /// does not wait. `env` keeps sh from becoming a login shell: Ghostty starts commands with
+    /// `exec -l`.
+    ///
+    /// Reaching a Host can be slow, so until den draws, the tab says in grey what it is
+    /// waiting for: ssh, then the shell there. The screen is cleared just before den runs.
+    ///
+    /// To see where the time goes, `defaults write pub.mkm.dense dense.debugAttach -bool
+    /// true`: then each step's line starts with the time in milliseconds, ssh runs with -v,
+    /// and the screen is not cleared, so it all stays in the tab's scrollback. den starts
+    /// 5 seconds late, so the lines can be read before it draws over them.
+    static func attachCommand(namespace: String, den: String, size: (rows: UInt16, columns: UInt16)? = nil) -> String {
+        let sized = size.map { #"[ "$(stty size)" = "\#($0.rows) \#($0.columns)" ] || "# } ?? ""
+        let waitForSize = #"trap : WINCH; \#(sized){ sleep 0.5 & wait $!; kill $! 2>/dev/null; }; exec "$0" "$@""#
+        var command: [String]
+        if let host = SpaceStore.shared.hosts.values.first(where: { $0.metadata.name == namespace }) {
+            let debug = UserDefaults.standard.bool(forKey: "dense.debugAttach")
+            let dest = host.spec.ssh
+            command = ["/bin/sh", "-c", waitForSize,
+                       "/bin/sh", "-c", say(debug ? "Connecting to %s, size %s…" : "Connecting to %s…", debug: debug) + (debug ? #" "$1" "$(stty size)""# : #" "$1""#) + #"; shift; exec "$@""#, "sh", dest,
+                       "/usr/bin/ssh", "-t"] + (debug ? ["-v"] : []) + ["--", dest, remoteAttach(host.spec, den: den, debug: debug)]
+            if debug {
+                // The size (rows columns) before and after the wait shows whether it was needed.
+                command = ["/bin/sh", "-c", say("Waiting for the terminal's size, now %s…", debug: true) + #" "$(stty size)"; exec "$0" "$@""#] + command
+            }
+        } else {
+            command = ["/bin/sh", "-c", waitForSize,
+                       denPath, "attach", "--unix-socket", SpaceStore.shared.socketPath, "-f", denURL(namespace, den)]
+        }
+        return (["/usr/bin/env"] + command).map(shellQuote).joined(separator: " ")
+    }
+
+    /// The command ssh runs on a Host to attach to one of its Dens. sshd hands it to the
+    /// user's shell there, which may not be sh, so it is wrapped in sh -c. It finds the
+    /// dennet socket where `dennet server run` puts it, unless the Host names one. It runs
+    /// the Host's `denPath`, or else den from a login, interactive shell, which reads the
+    /// files that put den on the PATH.
+    static func remoteAttach(_ host: DennetHost.Spec, den: String, debug: Bool = false) -> String {
+        let findSocket = host.socketPath.map { "s=\(shellQuote($0))" }
+            ?? #"for s in ${XDG_RUNTIME_DIR:+"$XDG_RUNTIME_DIR/dennet/dennet.sock"} "${XDG_STATE_HOME:-$HOME/.local/state}/dennet/dennet.sock"; do [ -S "$s" ] && break; done"#
+        let url = denURL("default", den)
+        // Clears the screen and its scrollback; sh's printf makes the escape characters.
+        let clear = debug ? "c=" : #"c=$(printf '\033[H\033[2J\033[3J')"#
+        let attach = if let denPath = host.denPath {
+            say("Starting den…", debug: debug) + (debug ? "; sleep 5" : "")
+                + #"; printf %s "$c"; exec \#(shellQuote(denPath)) attach --unix-socket "$s" -f \#(url)"#
+        } else {
+            // Login and interactive, like a terminal's shell: zsh reads .zshrc, where PATH
+            // is often set, only when interactive. Inside double quotes, so sh puts in the
+            // socket path and the escape characters before that shell runs it.
+            say("Starting a login shell to run den…", debug: debug)
+                + #"; exec "${SHELL:-sh}" -l -i -c ""#
+                // Through sh, as the shell there may be fish.
+                + (debug ? doubleQuoted("sh -c " + shellQuote(say("Login shell ready, starting den in 5 s…", debug: true) + "; sleep 5")) + "; " : "")
+                + #"printf %s '$c'; exec den attach --unix-socket '$s' -f \#(url)""#
+        }
+        return "sh -c " + shellQuote([findSocket, clear, attach].joined(separator: "; "))
+    }
+
+    /// A printf command that shows a line in grey. `format` may hold a %s. With `debug`, the
+    /// line starts with the time, to the millisecond if perl is there.
+    private static func say(_ format: String, debug: Bool = false) -> String {
+        let time = #"{ perl -MTime::HiRes=time -MPOSIX=strftime -e '$t = time; printf "%s.%03d ", strftime("%H:%M:%S", localtime $t), 1000 * ($t - int $t)' 2>/dev/null || date '+%H:%M:%S '; }; "#
+        return (debug ? #"printf '\033[2m'; "# + time : "") + "printf " + shellQuote(#"\033[2m"# + format + #"\033[0m\r\n"#)
+    }
+
+    /// Escapes sh code to go inside double quotes, so that the shell they are passed to
+    /// sees it as written.
+    private static func doubleQuoted(_ code: String) -> String {
+        code.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "$", with: "\\$")
+            .replacingOccurrences(of: "`", with: "\\`")
+    }
+
+    /// Quotes a word for sh.
+    static func shellQuote(_ word: String) -> String {
+        "'" + word.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
     }
 
     /// Where `den` is. Apps started from the Finder don't get the PATH a shell's rc files
