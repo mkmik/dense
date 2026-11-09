@@ -1102,7 +1102,7 @@ extension Ghostty {
             // focus, make sure that we explicitly tell it to lose focus. In theory
             // we should NOT have to do this but the focus callback isn't getting
             // called for some reason.
-            if let from = from {
+            if let from, from !== to {
                 _ = from.resignFirstResponder()
             }
 

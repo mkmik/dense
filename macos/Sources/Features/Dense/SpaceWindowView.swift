@@ -11,6 +11,12 @@ struct SpaceWindowView<Terminal: View>: View {
     @ObservedObject var store: SpaceStore = .shared
     let terminal: Terminal
 
+    /// The sidebar's width, which its right edge can be dragged to change. Saved for the
+    /// next window.
+    @AppStorage("dense.sidebarWidth") private var sidebarWidth: Double = 220
+    /// The width when the current drag of the sidebar's edge began.
+    @State private var dragStartWidth: Double?
+
     /// The height of the titlebar row the window buttons sit in.
     static var titlebarHeight: CGFloat { 28 }
 
@@ -37,10 +43,13 @@ struct SpaceWindowView<Terminal: View>: View {
                 .frame(height: Self.titlebarHeight)
                 SpaceSidebar(tabs: tabs, selection: ghostty.config.backgroundColor)
             }
-            .frame(width: 220)
+            .frame(width: sidebarWidth)
             .frame(maxHeight: .infinity, alignment: .top)
             // A grey wash over the terminal background, so the tint follows the theme.
             .background(Color(white: 0.5).opacity(0.15))
+            .overlay(alignment: .trailing) { resizeHandle }
+            // Above the terminal, which the handle reaches 3 points into.
+            .zIndex(1)
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     // In the titlebar row a drag moves the window, unless the view under
@@ -53,9 +62,15 @@ struct SpaceWindowView<Terminal: View>: View {
                 .padding(.horizontal, 8)
                 .frame(height: Self.titlebarHeight)
                 if tabs.selected != nil && (tabs.active == nil || tabs.waiting) {
-                    Text(placeholder)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: 12) {
+                        Text(placeholder).foregroundStyle(.secondary)
+                        if let stopped {
+                            // Return opens the confirmation; Return again restarts.
+                            Button("Restart Den…") { tabs.restartDen(stopped) }
+                                .keyboardShortcut(.defaultAction)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     terminal.padding(.leading, 8)
                 }
@@ -67,7 +82,38 @@ struct SpaceWindowView<Terminal: View>: View {
         // ponytail: with background-opacity below 1 the terminal area gets the
         // opacity twice; draw this only outside the terminal if that bothers anyone.
         .background(ghostty.config.backgroundColor.opacity(ghostty.config.backgroundOpacity))
+        .overlay(alignment: .bottomTrailing) { NewBuildPill() }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// A strip on the sidebar's right edge, below the titlebar row (where a drag moves the
+    /// window), that resizes it. The drag is measured in the window, as the strip moves
+    /// along with the mouse.
+    private var resizeHandle: some View {
+        Color.clear
+            .frame(width: 6)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { value in
+                    let start = dragStartWidth ?? sidebarWidth
+                    dragStartWidth = start
+                    sidebarWidth = min(max(start + value.translation.width, 150), 500)
+                }
+                .onEnded { _ in dragStartWidth = nil })
+            .padding(.top, Self.titlebarHeight)
+            .offset(x: 3)
+    }
+
+    /// The tab in front, when its den has stopped for good (Exited, Failed or Lost).
+    private var stopped: Surface? {
+        guard tabs.waiting, let surface = tabs.active.flatMap({ store.surfaces[$0] }),
+              let phase = store.den(of: surface)?.status?.phase,
+              !["Pending", "Running"].contains(phase) else { return nil }
+        return surface
     }
 
     /// What a Space shows when it has no terminal to show.
@@ -132,6 +178,9 @@ private struct SurfaceTabBar: View {
                     .background(GeometryReader { g in
                         Color.clear.preference(key: TabMiddles.self, value: [surface.id: g.frame(in: .named("tabs")).midX])
                     })
+                    .contextMenu {
+                        Button("Close Tab…", role: .destructive) { tabs.closeTab(surface) }
+                    }
                     .offset(x: dx ?? 0)
                     .zIndex(dx == nil ? 0 : 1)
                     .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named("tabs"))

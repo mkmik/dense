@@ -16,8 +16,77 @@ struct SpaceSidebar: View {
     @State private var drag: (id: String, dy: CGFloat)?
     /// The middle of each row, to work out where a dragged Space lands.
     @State private var middles: [String: CGFloat] = [:]
+    /// Whether the filter field is open, and the text in it.
+    @State private var filtering = false
+    @State private var filter = ""
+    @State private var filterHover = false
+    @FocusState private var filterFocused: Bool
 
     var body: some View {
+        VStack(spacing: 0) {
+            spaces
+            filterBar
+        }
+    }
+
+    /// The bottom of the sidebar, laid out like Rex's: a filter icon that never moves. On
+    /// hover a light pill shows behind it with the word "Filter"; a click turns the word
+    /// into a field that filters the Spaces by title, on a darker pill while it has the
+    /// focus. Esc, or leaving the field empty, closes it.
+    private var filterBar: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 16))
+                .foregroundStyle(filterFocused ? .primary : .secondary)
+            if filtering {
+                TextField("Filter", text: $filter)
+                    .textFieldStyle(.plain)
+                    .focused($filterFocused)
+                    .onExitCommand { closeFilter() }
+            } else if filterHover {
+                Text("Filter").foregroundStyle(.secondary)
+            }
+        }
+        .padding(.leading, 7.5)
+        .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .leading)
+        .background(Capsule().fill(Color.primary.opacity(filterFocused ? 0.075 : filterHover || filtering ? 0.037 : 0)))
+        .contentShape(Capsule())
+        .onHover { filterHover = $0 }
+        .onTapGesture {
+            filtering = true
+            // Once the field is there.
+            DispatchQueue.main.async { filterFocused = true }
+        }
+        .onChange(of: filterFocused) { focused in
+            if !focused && filter.isEmpty { closeFilter() }
+        }
+        .padding(.horizontal, 7)
+        .padding(.top, 4)
+        .padding(.bottom, 6.5)
+    }
+
+    private func closeFilter() {
+        filter = ""
+        filtering = false
+        filterFocused = false
+    }
+
+    /// The rows of one machine's Spaces. While filtering, the Spaces whose title matches,
+    /// and the Spaces above them so they show where they are.
+    private func rows(on host: String?) -> [Space.Row] {
+        let rows = Space.rows(store.spaces(on: host))
+        let filter = filter.trimmingCharacters(in: .whitespaces)
+        guard !filter.isEmpty else { return rows }
+        let parents = Dictionary(rows.map { ($0.id, $0.parent) }) { a, _ in a }
+        var keep = Set<String>()
+        for row in rows where (row.space.spec.title ?? row.space.metadata.name).localizedCaseInsensitiveContains(filter) {
+            var id: String? = row.id
+            while let current = id, !current.isEmpty, keep.insert(current).inserted { id = parents[current] }
+        }
+        return rows.filter { keep.contains($0.id) }
+    }
+
+    private var spaces: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 if let problem = store.problem {
@@ -25,13 +94,16 @@ struct SpaceSidebar: View {
                 }
                 // nil is this machine.
                 ForEach([nil] + store.hostNames.map(Optional.some), id: \.self) { host in
-                    let rows = Space.rows(store.spaces(on: host))
-                    HostHeader(name: host ?? "localhost")
-                    if let host, let problem = store.hostProblems[host] {
-                        Text(problem).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
-                    }
-                    ForEach(rows) { row in
-                        self.row(row, among: rows)
+                    let rows = self.rows(on: host)
+                    // While filtering, a machine with no match is left out.
+                    if filter.isEmpty || !rows.isEmpty {
+                        HostHeader(name: host ?? "localhost")
+                        if let host, let problem = store.hostProblems[host] {
+                            Text(problem).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
+                        }
+                        ForEach(rows) { row in
+                            self.row(row, among: rows)
+                        }
                     }
                 }
             }
@@ -64,6 +136,7 @@ struct SpaceSidebar: View {
             .offset(y: dy ?? 0)
             .zIndex(dy == nil ? 0 : 1)
             .onTapGesture { tabs.select(row.space) }
+            // No reordering while filtering: hidden siblings would lose their place.
             .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .named("spaces"))
                 .onChanged { drag = (row.id, $0.translation.height) }
                 .onEnded { value in
@@ -73,9 +146,10 @@ struct SpaceSidebar: View {
                         $0.id != row.id && middles[$0.id, default: 0] < value.location.y
                     }.count)
                     drag = nil
-                })
+                }, including: filter.isEmpty ? .all : .subviews)
             .contextMenu {
                 Button("New Subspace…") { tabs.newSpace(parent: row.space) }
+                Button("Rename…") { tabs.renameSpace(row.space) }
                 Divider()
                 Button("Delete Space…", role: .destructive) { tabs.deleteSpace(row.space) }
             }
@@ -120,8 +194,14 @@ private struct SpaceRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
-            Circle()
-                .fill(Self.color(space.spec.state))
+            // Idle (or unset) is a hollow ring; every other state is a filled dot.
+            Group {
+                if space.spec.state == nil || space.spec.state == "idle" {
+                    Circle().strokeBorder(Self.color(space.spec.state), lineWidth: 1)
+                } else {
+                    Circle().fill(Self.color(space.spec.state))
+                }
+            }
                 .frame(width: 7, height: 7)
                 .padding(.top, 5)
             VStack(alignment: .leading, spacing: 2) {

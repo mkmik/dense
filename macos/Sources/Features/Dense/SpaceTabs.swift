@@ -225,6 +225,38 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
+    /// Asks for a new title and writes it to the Space in dennet.
+    func renameSpace(_ space: Space) {
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = space.spec.title ?? ""
+        field.placeholderString = "Title"
+        let alert = NSAlert()
+        alert.messageText = "Rename Space"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+
+        let rename = { [weak self] (response: NSApplication.ModalResponse) in
+            let title = field.stringValue.trimmingCharacters(in: .whitespaces)
+            guard let self, response == .alertFirstButtonReturn, !title.isEmpty, title != space.spec.title else { return }
+            let path = "/apis/den.mkm.pub/v1alpha1/namespaces/\(space.metadata.namespace ?? "default")/spaces/\(space.metadata.name)"
+            Task { @MainActor in
+                do {
+                    _ = try await SpaceStore.shared.request(
+                        "PATCH", path, json: ["spec": ["title": title]], contentType: "application/merge-patch+json")
+                } catch {
+                    self.alert("Could not rename the Space", error)
+                }
+            }
+        }
+        if let window = controller?.window {
+            alert.beginSheetModal(for: window, completionHandler: rename)
+        } else {
+            rename(alert.runModal())
+        }
+    }
+
     /// Asks, in a sheet like Ghostty's close confirmations, then deletes a Space from
     /// dennet with its subspaces, their tabs (Surfaces) and the Dens those attach to, which
     /// ends their terminal sessions. dennet does not delete dependent objects itself.
@@ -268,14 +300,7 @@ final class SpaceTabs: ObservableObject {
             Task { @MainActor in
                 let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)"
                 do {
-                    for surface in surfaces {
-                        _ = try await store.request("DELETE", "\(root)/surfaces/\(surface.metadata.name)")
-                        // A Den that has already gone is not an error.
-                        if let den = store.den(of: surface) {
-                            _ = try await store.request("DELETE", "\(root)/dens/\(den.metadata.name)")
-                        }
-                        self.trees[surface.id] = nil
-                    }
+                    for surface in surfaces { try await self.delete(surface) }
                     // Children first, so no subspace shows at the top level for a moment.
                     for space in doomed.reversed() {
                         _ = try await store.request("DELETE", "\(root)/spaces/\(space.metadata.name)")
@@ -301,6 +326,111 @@ final class SpaceTabs: ObservableObject {
         } else {
             delete(alert.runModal())
         }
+    }
+
+    /// Asks, as Ghostty does, then deletes the tab's Surface and Den in dennet, which ends
+    /// its terminal session. If it was in front, the next tab is shown.
+    func closeTab(_ surface: Surface) {
+        let alert = NSAlert()
+        alert.messageText = "Close Tab?"
+        alert.informativeText = "The terminal still has a running process. If you close the tab the process will be killed."
+        alert.addButton(withTitle: "Close")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+
+        let close = { [weak self] (response: NSApplication.ModalResponse) in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            alert.window.orderOut(nil)
+            Task { @MainActor in
+                do {
+                    try await self.delete(surface)
+                } catch {
+                    self.alert("Could not close the tab", error)
+                    return
+                }
+                guard self.active == surface.id else { return }
+                self.active = nil
+                // dennet's watch may not have reported the delete yet.
+                self.show(self.tabs.first { $0.id != surface.id })
+            }
+        }
+        if let window = controller?.window {
+            alert.beginSheetModal(for: window, completionHandler: close)
+        } else {
+            close(alert.runModal())
+        }
+    }
+
+    /// Asks, then makes the tab's Den again with the same name and spec, so dennet starts
+    /// a new den for it and the tab attaches once it runs. For a den that has stopped.
+    func restartDen(_ surface: Surface) {
+        guard let den = SpaceStore.shared.den(of: surface) else { return NSSound.beep() }
+        let alert = NSAlert()
+        alert.messageText = "Restart the den?"
+        alert.informativeText = "A new den starts with the same settings. What ran in the old one is gone."
+        alert.addButton(withTitle: "Restart")
+        alert.addButton(withTitle: "Cancel")
+
+        let restart = { [weak self] (response: NSApplication.ModalResponse) in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            alert.window.orderOut(nil)
+            Task { @MainActor in
+                do {
+                    try await Self.recreate(den)
+                } catch {
+                    self.alert("Could not restart the den", error)
+                }
+            }
+        }
+        if let window = controller?.window {
+            alert.beginSheetModal(for: window, completionHandler: restart)
+        } else {
+            restart(alert.runModal())
+        }
+    }
+
+    /// Deletes a Den and creates it again from its own spec, labels and annotations. The
+    /// name has to be free first: dennet keeps a Den until its den has stopped, which for
+    /// a lost den can take a Lease term (30 s).
+    @MainActor
+    private static func recreate(_ den: Den) async throws {
+        let store = SpaceStore.shared
+        let namespace = den.metadata.namespace ?? "default"
+        let path = "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)/dens/\(den.metadata.name)"
+        let old = try JSONSerialization.jsonObject(with: try await store.request("GET", path)) as? [String: Any]
+        let oldMeta = old?["metadata"] as? [String: Any] ?? [:]
+        var metadata: [String: Any] = ["name": den.metadata.name]
+        for key in ["labels", "annotations"] { metadata[key] = oldMeta[key] }
+
+        _ = try await store.request("DELETE", path)
+        let deadline = Date.now.addingTimeInterval(40)
+        while true {
+            do {
+                _ = try await store.request("GET", path)
+            } catch let error as SpaceStore.RequestError where error.message.contains("not found") {
+                break
+            }
+            guard Date.now < deadline else {
+                throw SpaceStore.RequestError(message: "The old den has not stopped yet. Try again in a moment.")
+            }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        let _: Created = try await store.create(
+            "dens", kind: "Den", namespace: namespace, metadata: metadata,
+            spec: old?["spec"] as? [String: Any] ?? [:])
+    }
+
+    /// Deletes a tab's Surface and its Den in dennet, and drops its terminal.
+    @MainActor
+    private func delete(_ surface: Surface) async throws {
+        let store = SpaceStore.shared
+        let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(surface.metadata.namespace ?? "default")"
+        _ = try await store.request("DELETE", "\(root)/surfaces/\(surface.metadata.name)")
+        // A Den that has already gone is not an error.
+        if let den = store.den(of: surface) {
+            _ = try await store.request("DELETE", "\(root)/dens/\(den.metadata.name)")
+        }
+        trees[surface.id] = nil
     }
 
     /// Ghostty's goto_tab: a tab number from 1, or previous, next or last. Returns false
