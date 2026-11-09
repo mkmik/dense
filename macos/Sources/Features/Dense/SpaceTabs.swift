@@ -29,6 +29,11 @@ final class SpaceTabs: ObservableObject {
     /// True while the tab in front has no terminal because its den does not run yet.
     @Published private(set) var waiting = false
 
+    /// The terminals' font, as Ghostty resolved it from the config, once a terminal has
+    /// been shown. The sidebar uses it.
+    // ponytail: read when a tab is shown, so a font change shows there on the next switch.
+    @Published private(set) var font: NSFont?
+
     private weak var controller: TerminalController?
 
     /// Each tab's terminal tree, by Surface id. A tree can hold splits made inside the tab.
@@ -85,12 +90,6 @@ final class SpaceTabs: ObservableObject {
         return space.terminals(Array(SpaceStore.shared.surfaces.values))
     }
 
-    /// The terminal of a tab that has been shown, for its live title.
-    func terminal(for surface: Surface) -> Ghostty.SurfaceView? {
-        let tree = surface.id == active ? controller?.surfaceTree : trees[surface.id]
-        return tree?.root?.leftmostLeaf()
-    }
-
     func select(_ space: Space) {
         selected = space.id
         show(tabs.first { $0.id == lastTab[space.id] } ?? tabs.first)
@@ -126,6 +125,11 @@ final class SpaceTabs: ObservableObject {
         controller.surfaceTree = tree
         if let view = tree.root?.leftmostLeaf() {
             DispatchQueue.main.async { Ghostty.moveFocus(to: view, from: old) }
+            if let surface = view.surface, let raw = ghostty_surface_quicklook_font(surface) {
+                // A copy of the CTFont, which is ours to release.
+                let ctFont = Unmanaged<CTFont>.fromOpaque(raw).takeRetainedValue()
+                if font != ctFont as NSFont { font = ctFont as NSFont }
+            }
         }
     }
 
@@ -155,7 +159,12 @@ final class SpaceTabs: ObservableObject {
         let order = (tabs.compactMap(\.spec.order).max() ?? 0) + 10
 
         var den: [String: Any] = [
-            "workingDir": config?.workingDirectory ?? controller?.focusedSurface?.pwd ?? NSHomeDirectory(),
+            // The Space's directory first, so a new tab starts there and not wherever the
+            // tab it was made from has cd'd to.
+            // ponytail: this also wins over a folder Ghostty asks for (Services "New Tab
+            // Here"); tell them apart if that comes up.
+            "workingDir": Space.workingDir(of: space, in: SpaceStore.shared.spaces)
+                ?? config?.workingDirectory ?? controller?.focusedSurface?.pwd ?? NSHomeDirectory(),
             "inheritEnv": ["LANG", "LC_*", "SSH_AUTH_SOCK", "TMPDIR"],
         ]
         if let command = config?.command, !command.isEmpty {
@@ -254,6 +263,52 @@ final class SpaceTabs: ObservableObject {
             alert.beginSheetModal(for: window, completionHandler: rename)
         } else {
             rename(alert.runModal())
+        }
+    }
+
+    /// Edits a Space's tags in a token field, as Finder's Tags field does: each tag is a
+    /// token, typed tags are completed from the tags other Spaces have, and comma, space
+    /// or Return ends a tag. A leading "#" is dropped, as the filter adds it.
+    func editTags(_ space: Space) {
+        let field = NSTokenField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        field.objectValue = space.spec.tags ?? []
+        field.placeholderString = "Add tags"
+        field.tokenizingCharacterSet = CharacterSet(charactersIn: ", ").union(.newlines)
+        let completions = TagCompletions(SpaceStore.shared.spaces.values.flatMap { $0.spec.tags ?? [] })
+        field.delegate = completions
+
+        let alert = NSAlert()
+        alert.messageText = "Tags of \"\(space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name)\""
+        alert.informativeText = "Filter the sidebar by a tag with #tag."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+
+        let save = { [weak self] (response: NSApplication.ModalResponse) in
+            _ = completions // Kept until the sheet is done: the field holds its delegate weakly.
+            guard let self, response == .alertFirstButtonReturn else { return }
+            // Unique and not empty, as dennet requires; in the order typed.
+            var seen = Set<String>()
+            let tags = (field.objectValue as? [String] ?? [])
+                .map { String($0.trimmingCharacters(in: .whitespaces).drop { $0 == "#" }) }
+                .filter { !$0.isEmpty && seen.insert($0).inserted }
+            guard tags != space.spec.tags ?? [] else { return }
+            let path = "/apis/den.mkm.pub/v1alpha1/namespaces/\(space.metadata.namespace ?? "default")/spaces/\(space.metadata.name)"
+            Task { @MainActor in
+                do {
+                    _ = try await SpaceStore.shared.request(
+                        "PATCH", path, json: ["spec": ["tags": tags.isEmpty ? NSNull() : tags as Any]],
+                        contentType: "application/merge-patch+json")
+                } catch {
+                    self.alert("Could not save the tags", error)
+                }
+            }
+        }
+        if let window = controller?.window {
+            alert.beginSheetModal(for: window, completionHandler: save)
+        } else {
+            save(alert.runModal())
         }
     }
 
@@ -632,4 +687,23 @@ final class SpaceTabs: ObservableObject {
         let dirs = ["\(home)/bin", "\(home)/.local/bin", "\(home)/go/bin", "/opt/homebrew/bin", "/usr/local/bin"]
         return dirs.map { "\($0)/den" }.first { FileManager.default.isExecutableFile(atPath: $0) } ?? "den"
     }()
+}
+
+/// Completes a tag being typed in a token field from the tags in use.
+private final class TagCompletions: NSObject, NSTokenFieldDelegate {
+    private let tags: [String]
+
+    init(_ tags: [String]) {
+        self.tags = Array(Set(tags)).sorted()
+    }
+
+    func tokenField(
+        _ tokenField: NSTokenField,
+        completionsForSubstring substring: String,
+        indexOfToken tokenIndex: Int,
+        indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>?
+    ) -> [Any]? {
+        let typed = substring.drop { $0 == "#" }
+        return tags.filter { $0.lowercased().hasPrefix(typed.lowercased()) }
+    }
 }

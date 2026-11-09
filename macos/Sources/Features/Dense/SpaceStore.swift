@@ -30,6 +30,10 @@ struct Space: DennetObject {
         var badges: [Badge]?
         var state: String?
         var collapsed: Bool?
+        /// Free-form labels. Not shown; the sidebar filter can match them with "#tag".
+        var tags: [String]?
+        /// Where dens for this Space's tabs start; unset means the nearest Space above's.
+        var workingDir: String?
     }
 
     struct Badge: Decodable, Equatable {
@@ -64,6 +68,11 @@ struct Surface: DennetObject {
 /// A terminal session, run by den. dense creates Dens and reads their status, which den
 /// (or dennet) keeps up to date.
 struct Den: DennetObject {
+    struct Spec: Decodable, Equatable {
+        /// The program and its arguments; nil runs the user's shell.
+        var command: [String]?
+    }
+
     struct Status: Decodable, Equatable {
         /// Pending, Running, Exited, Failed or Lost.
         var phase: String?
@@ -72,10 +81,22 @@ struct Den: DennetObject {
     }
 
     var metadata: ObjectMeta
+    var spec: Spec?
     var status: Status?
 
     /// Whether the den runs and has a socket to attach to.
     var running: Bool { status?.phase == "Running" && status?.socket?.isEmpty == false }
+
+    /// Whether the den runs a coding agent: a word of its command is one, as in
+    /// ["claude"] or ["/bin/zsh", "-lic", "claude --resume ID; exec /bin/zsh -l"].
+    // ponytail: only these names, and only in the command the den was started with; an
+    // agent started by hand in the den's shell isn't seen. Add names as they come up.
+    var agent: Bool {
+        (spec?.command ?? []).contains { arg in
+            arg.split(whereSeparator: { $0.isWhitespace || $0 == ";" || $0 == "&" || $0 == "|" })
+                .contains { ["claude", "codex"].contains($0.split(separator: "/").last.map(String.init) ?? "") }
+        }
+    }
 }
 
 /// Another machine running dennet. Cluster-scoped: its objects show up here in the
@@ -126,6 +147,63 @@ extension Space {
         }
         add("", 0)
         return rows
+    }
+
+    /// Where tree lines go for each row, by row id. A line runs down through level k
+    /// (1 ..< depth) while the row's ancestor at depth k has siblings still to come, and the
+    /// row's own connector is "└" when it is its parent's last row, else "├".
+    struct Guide: Equatable {
+        var through: [Bool]
+        var last: Bool
+    }
+
+    static func guides(_ rows: [Row]) -> [String: Guide] {
+        var lastAt: [Int: Bool] = [:]
+        var guides: [String: Guide] = [:]
+        for (i, row) in rows.enumerated() {
+            // Last unless a sibling comes before the rows leave this row's parent.
+            let last = !rows[(i + 1)...].prefix { $0.depth >= row.depth }.contains { $0.depth == row.depth }
+            lastAt[row.depth] = last
+            guides[row.id] = Guide(through: (0..<row.depth).map { $0 > 0 && lastAt[$0] == false }, last: last)
+        }
+        return guides
+    }
+
+    /// The working directory for a new tab in `space`: its own, else the nearest one set
+    /// on a Space above it in `spaces`. dennet leaves the inheriting to whoever makes dens.
+    static func workingDir(of space: Space, in spaces: [String: Space]) -> String? {
+        var seen: Set<String> = []
+        var current: Space? = space
+        while let s = current, seen.insert(s.id).inserted {
+            if let dir = s.spec.workingDir, !dir.isEmpty { return dir }
+            current = s.spec.parent.flatMap { spaces[objectID(s.metadata.namespace, $0)] }
+        }
+        return nil
+    }
+
+    /// The rows a sidebar filter keeps. Words of the query that start with "#" are tags: a
+    /// row is kept if it, or a Space above it, has one of those tags exactly, so a tagged
+    /// Space brings its subspaces along. The other words, together, must be in the title.
+    /// The Spaces above a kept row stay too, to show where it is.
+    static func filter(_ rows: [Row], _ query: String) -> [Row] {
+        let words = query.split(whereSeparator: \.isWhitespace)
+        let tags = Set(words.filter { $0.hasPrefix("#") && $0.count > 1 }.map { String($0.dropFirst()) })
+        let text = words.filter { !$0.hasPrefix("#") }.joined(separator: " ")
+        guard !tags.isEmpty || !text.isEmpty else { return rows }
+
+        let parents = Dictionary(rows.map { ($0.id, $0.parent) }) { a, _ in a }
+        // Rows come after the row above them, so a parent's answer is known first.
+        var tagged: [String: Bool] = [:]
+        var keep = Set<String>()
+        for row in rows {
+            tagged[row.id] = !Set(row.space.spec.tags ?? []).isDisjoint(with: tags) || tagged[row.parent] == true
+            guard tags.isEmpty || tagged[row.id] == true,
+                  text.isEmpty || (row.space.spec.title ?? row.space.metadata.name).localizedCaseInsensitiveContains(text)
+            else { continue }
+            var id: String? = row.id
+            while let current = id, !current.isEmpty, keep.insert(current).inserted { id = parents[current] }
+        }
+        return rows.filter { keep.contains($0.id) }
     }
 
     /// This space's terminal Surfaces, sorted by order, then name.

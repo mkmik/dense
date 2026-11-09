@@ -1,3 +1,4 @@
+import GhosttyKit
 import SwiftUI
 
 /// A dense window's content, laid out like Rex: the content runs under a transparent
@@ -41,7 +42,7 @@ struct SpaceWindowView<Terminal: View>: View {
                 }
                 .padding(.horizontal, 8)
                 .frame(height: Self.titlebarHeight)
-                SpaceSidebar(tabs: tabs, selection: ghostty.config.backgroundColor)
+                SpaceSidebar(tabs: tabs, selection: ghostty.config.backgroundColor, look: terminalLook)
             }
             .frame(width: sidebarWidth)
             .frame(maxHeight: .infinity, alignment: .top)
@@ -116,6 +117,26 @@ struct SpaceWindowView<Terminal: View>: View {
         return surface
     }
 
+    /// How the terminals draw text. Until a terminal has been shown, the font is the
+    /// system's monospaced one at the config's font-size.
+    private var terminalLook: TerminalLook {
+        var size: Float = 13
+        var thicken = false
+        var ink = ghostty_config_color_s()
+        if let config = ghostty.config.config {
+            func get<T>(_ key: String, _ value: inout T) -> Bool {
+                ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8)))
+            }
+            _ = get("font-size", &size)
+            _ = get("font-thicken", &thicken)
+            if !get("foreground", &ink) { ink = .init(r: 0, g: 0, b: 0) }
+        }
+        return TerminalLook(
+            font: tabs.font ?? .monospacedSystemFont(ofSize: CGFloat(size), weight: .regular),
+            ink: NSColor(srgbRed: CGFloat(ink.r) / 255, green: CGFloat(ink.g) / 255, blue: CGFloat(ink.b) / 255, alpha: 1),
+            thicken: thicken)
+    }
+
     /// What a Space shows when it has no terminal to show.
     private var placeholder: String {
         // Blank while the Space is not there, as when its Host has not answered yet.
@@ -160,13 +181,15 @@ private struct SurfaceTabBar: View {
     var body: some View {
         HStack(spacing: 2) {
             if let surfaces {
-                ForEach(surfaces, id: \.id) { surface in
+                ForEach(Array(surfaces.enumerated()), id: \.element.id) { index, surface in
                     let front = surface.id == tabs.active
                     let dx = drag?.id == surface.id ? drag?.dx : nil
                     Button { tabs.show(surface) } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: "terminal").imageScale(.small)
-                            title(surface).lineLimit(1)
+                            // A sparkle for a tab running a coding agent.
+                            Image(systemName: SpaceStore.shared.den(of: surface)?.agent == true ? "sparkle" : "terminal")
+                                .imageScale(.small)
+                            Text(Self.title(surface, index: index)).lineLimit(1)
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
@@ -205,16 +228,10 @@ private struct SurfaceTabBar: View {
         .onPreferenceChange(TabMiddles.self) { middles = $0 }
     }
 
-    /// The Surface's title if it has one, else the terminal's own title.
-    @ViewBuilder
-    private func title(_ surface: Surface) -> some View {
-        if let title = surface.spec.title, !title.isEmpty {
-            Text(title)
-        } else if let view = tabs.terminal(for: surface) {
-            TerminalTitle(view: view, fallback: surface.metadata.name)
-        } else {
-            Text(surface.metadata.name)
-        }
+    /// The Surface's title if it has been given one, else its place in the row from 1, the
+    /// number that Go to Tab (⌘1, ⌘2, …) uses.
+    private static func title(_ surface: Surface, index: Int) -> String {
+        surface.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? "\(index + 1)"
     }
 }
 
@@ -223,15 +240,5 @@ private struct TabMiddles: PreferenceKey {
 
     static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
         value.merge(nextValue()) { $1 }
-    }
-}
-
-private struct TerminalTitle: View {
-    @ObservedObject var view: Ghostty.SurfaceView
-    let fallback: String
-
-    var body: some View {
-        // Ghostty shows 👻 while a terminal has not set a title.
-        Text(view.title.isEmpty || view.title == "👻" ? fallback : view.title)
     }
 }
