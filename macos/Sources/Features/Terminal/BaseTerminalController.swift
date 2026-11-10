@@ -277,6 +277,8 @@ class BaseTerminalController: NSWindowController,
         }
     }
 
+    static let splitsDisabled = true
+
     /// Create a new split.
     @discardableResult
     func newSplit(
@@ -284,6 +286,11 @@ class BaseTerminalController: NSWindowController,
         direction: SplitTree<Ghostty.SurfaceView>.NewDirection,
         baseConfig config: Ghostty.SurfaceConfiguration? = nil
     ) -> Ghostty.SurfaceView? {
+        // dense: no splits. dennet doesn't model them, so a split's shell isn't a den and is
+        // lost on quit. Every way to make one (menu, keybinding, command palette, AppleScript,
+        // Shortcuts) ends up here. Delete this line to bring them back.
+        if Self.splitsDisabled { return nil }
+
         // We can only create new splits for surfaces in our tree.
         guard surfaceTree.root?.node(view: oldView) != nil else { return nil }
 

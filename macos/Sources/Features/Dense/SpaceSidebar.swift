@@ -73,6 +73,12 @@ struct SpaceSidebar: View {
             // Once the field is there.
             DispatchQueue.main.async { filterFocused = true }
         }
+        .onReceive(NotificationCenter.default.publisher(for: SpaceTabs.focusFilter)) { note in
+            guard note.object as AnyObject? === tabs else { return }
+            filtering = true
+            // After the command palette has given the focus back to the terminal.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { filterFocused = true }
+        }
         .onChange(of: filterFocused) { focused in
             if !focused && filter.isEmpty { closeFilter() }
         }

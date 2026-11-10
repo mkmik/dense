@@ -28,6 +28,8 @@ extension Ghostty {
             "toggle_window_decorations",
             "prompt_window_title",
             "show_gtk_inspector",
+            // dense: a split isn't a den, so its shell is gone on quit. See BaseTerminalController.newSplit.
+            "new_split",
         ]
 
         init(cValue: ghostty_command_s) {
