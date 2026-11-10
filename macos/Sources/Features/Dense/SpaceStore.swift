@@ -5,6 +5,7 @@ import Network
 struct ObjectMeta: Decodable, Equatable {
     var name: String
     var namespace: String?
+    var annotations: [String: String]?
 }
 
 /// An object stored in dennet (`den.mkm.pub/v1alpha1`). Only the fields dense uses are
@@ -18,7 +19,7 @@ extension DennetObject {
     var id: String { objectID(metadata.namespace, metadata.name) }
 }
 
-private func objectID(_ namespace: String?, _ name: String) -> String { "\(namespace ?? "")/\(name)" }
+func objectID(_ namespace: String?, _ name: String) -> String { "\(namespace ?? "")/\(name)" }
 
 /// One node of the sidebar tree.
 struct Space: DennetObject {
@@ -63,6 +64,38 @@ struct Surface: DennetObject {
 
     var metadata: ObjectMeta
     var spec: Spec
+}
+
+/// A program in a tab asking dense to show a Space, or a tab of one: the
+/// `dense.mkm.pub/show` annotation on that tab's Surface, as JSON
+/// `{"space": name, "surface": name, "at": time}`, names in the Surface's namespace. A
+/// tab alone is enough; its Space is found from it. The time is there only so that every
+/// request is a change to the annotation, even one asking for what the last one did.
+///
+/// Only the window that was just typed into the tab that asks does what it says (see
+/// `SpaceTabs.obeys`), so each window keeps showing what it shows otherwise. Nothing in
+/// dennet says what a window shows.
+struct ShowRequest: Decodable, Equatable {
+    static let annotation = "dense.mkm.pub/show"
+
+    /// The id of the Surface that asks.
+    var from = ""
+    /// The ids of the Space and the tab to show.
+    var space: String?
+    var surface: String?
+
+    enum CodingKeys: CodingKey { case space, surface }
+
+    /// The request on a Surface, if it has one.
+    init?(_ asking: Surface) {
+        guard let json = asking.metadata.annotations?[Self.annotation],
+              let names = try? JSONDecoder().decode(Self.self, from: Data(json.utf8)),
+              names.space != nil || names.surface != nil else { return nil }
+        let namespace = asking.metadata.namespace
+        from = asking.id
+        space = names.space.map { objectID(namespace, $0) }
+        surface = names.surface.map { objectID(namespace, $0) }
+    }
 }
 
 /// A terminal session, run by den. dense creates Dens and reads their status, which den
@@ -245,6 +278,10 @@ final class SpaceStore: ObservableObject {
             queue.async { self.watchHosts(names) }
         }
     }
+
+    /// Requests to show a Space or tab, as they come in. Only changes are sent: a request
+    /// already there when a watch starts, or starts again, is old.
+    let showRequests = PassthroughSubject<ShowRequest, Never>()
 
     /// Why dennet can't be reached right now, or nil while the watches are running.
     @Published private(set) var problem: String?
@@ -489,6 +526,12 @@ final class SpaceStore: ObservableObject {
                         DispatchQueue.main.async {
                             // A Den's status changes often in fields dense doesn't read.
                             let new = deleted ? nil : object
+                            if let surface = new as? Surface,
+                               let ask = surface.metadata.annotations?[ShowRequest.annotation],
+                               ask != self.surfaces[surface.id]?.metadata.annotations?[ShowRequest.annotation],
+                               let request = ShowRequest(surface) {
+                                self.showRequests.send(request)
+                            }
                             if deleted { self.owned[key]?.remove(object.id) } else { self.owned[key, default: []].insert(object.id) }
                             if self[keyPath: list][object.id] != new { self[keyPath: list][object.id] = new }
                         }

@@ -19,6 +19,9 @@ import GhosttyKit
 ///
 /// The selected Space and each Space's front tab are saved in the user defaults, and a new
 /// window opens on them once dennet's lists have loaded.
+///
+/// A program in a tab can ask for another Space or tab to be shown (`ShowRequest`). The
+/// window that does it is the one the user asked from, see `obeys`.
 final class SpaceTabs: ObservableObject {
     /// The id of the Space shown, or nil while the window shows its own terminal.
     @Published private(set) var selected: String?
@@ -51,6 +54,14 @@ final class SpaceTabs: ObservableObject {
 
     private var restore: AnyCancellable?
     private var denChanges: AnyCancellable?
+
+    /// When a key was last pressed in this window.
+    private var lastKey = Date.distantPast
+    private var keyMonitor: Any?
+    private var showRequests: AnyCancellable?
+    /// A request obeyed whose Space or tab dennet hasn't sent yet, and until when to wait.
+    private var pendingShow: (request: ShowRequest, until: Date)?
+    private var pendingChanges: AnyCancellable?
 
     private static let selectedKey = "dense.selectedSpace"
     private static let lastTabKey = "dense.lastTab"
@@ -86,6 +97,47 @@ final class SpaceTabs: ObservableObject {
                   SpaceStore.shared.den(of: surface)?.running == true else { return }
             self.show(surface)
         }
+
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if let self, let window = event.window, window === self.controller?.window { self.lastKey = Date() }
+            return event
+        }
+        showRequests = store.showRequests.receive(on: DispatchQueue.main).sink { [weak self] request in
+            guard let self, SpaceTabs.obeys(request, active: self.active, lastKey: self.lastKey) else { return }
+            self.pendingShow = nil
+            if !self.go(to: request) { self.pendingShow = (request, Date() + 10) }
+        }
+        pendingChanges = store.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            guard let self, let pending = self.pendingShow else { return }
+            if Date() > pending.until || self.go(to: pending.request) { self.pendingShow = nil }
+        }
+    }
+
+    deinit {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+    }
+
+    /// Whether this window does what a `ShowRequest` asks: the request comes from the tab in
+    /// front here, and a key was pressed here a moment ago. That is the window whose key press
+    /// made the program ask, which is the same window den gives the terminal's size to: the
+    /// one last typed into. Other windows showing that tab, here or on another machine, stay.
+    static func obeys(_ request: ShowRequest, active: String?, lastKey: Date, now: Date = Date()) -> Bool {
+        request.from == active && now.timeIntervalSince(lastKey) < 5
+    }
+
+    /// Shows what a request asks for. False while dennet hasn't sent it yet.
+    private func go(to request: ShowRequest) -> Bool {
+        let store = SpaceStore.shared
+        if let id = request.surface {
+            guard let surface = store.surfaces[id],
+                  let space = store.spaces[objectID(surface.metadata.namespace, surface.spec.space)] else { return false }
+            selected = space.id
+            show(surface)
+        } else if let id = request.space {
+            guard let space = store.spaces[id] else { return false }
+            select(space)
+        }
+        return true
     }
 
     /// The selected Space's terminal tabs, in order.
