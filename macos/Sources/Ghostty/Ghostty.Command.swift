@@ -18,8 +18,16 @@ extension Ghostty {
 
         /// True if this can be performed on this target.
         var isSupported: Bool {
-            !Self.unsupportedActionKeys.contains(actionKey)
+            !Self.unsupportedActionKeys.contains(actionKey) && !Self.unsupportedActions.contains(action)
         }
+
+        /// dense: whole actions that mean nothing here. Its tabs are a Space's, not macOS
+        /// window tabs, so closing the others or the ones to the right does nothing useful;
+        /// Close Tab itself goes to the Space's tab.
+        static let unsupportedActions: [String] = [
+            "close_tab:other",
+            "close_tab:right",
+        ]
 
         /// Unsupported action keys, because they either don't make sense in the context of our
         /// target platform or they just aren't implemented yet.
@@ -28,6 +36,13 @@ extension Ghostty {
             "toggle_window_decorations",
             "prompt_window_title",
             "show_gtk_inspector",
+            // dense: a split isn't a den, so its shell is gone on quit. See BaseTerminalController.newSplit.
+            "new_split",
+            // With no splits, there is nothing to move to, zoom or equalize.
+            "goto_split",
+            "toggle_split_zoom",
+            "equalize_splits",
+            "resize_split",
         ]
 
         init(cValue: ghostty_command_s) {

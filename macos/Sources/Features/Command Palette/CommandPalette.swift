@@ -21,6 +21,8 @@ struct CommandOption: Identifiable, Hashable {
     let emphasis: Bool
     /// Sort key for stable ordering when titles are equal.
     let sortKey: ObjectIdentifier?
+    /// Drawn in place of the icon, title, subtitle and badge, which are still searched.
+    let row: AnyView?
     /// The action to perform when this option is selected.
     let action: () -> Void
 
@@ -34,6 +36,7 @@ struct CommandOption: Identifiable, Hashable {
         badge: String? = nil,
         emphasis: Bool = false,
         sortKey: ObjectIdentifier? = nil,
+        row: AnyView? = nil,
         action: @escaping () -> Void
     ) {
         self.title = title
@@ -45,6 +48,7 @@ struct CommandOption: Identifiable, Hashable {
         self.badge = badge
         self.emphasis = emphasis
         self.sortKey = sortKey
+        self.row = row
         self.action = action
     }
 
@@ -61,6 +65,7 @@ struct CommandPaletteView: View {
     @Binding var isPresented: Bool
     var backgroundColor: Color = Color(nsColor: .windowBackgroundColor)
     var options: [CommandOption]
+    var placeholder = "Execute a command…"
     @State private var rawQuery = ""
     @State private var selectedIndex: UInt?
     @State private var hoveredOptionID: UUID?
@@ -97,7 +102,7 @@ struct CommandPaletteView: View {
         }
 
         VStack(alignment: .leading, spacing: 0) {
-            CommandPaletteQuery(query: $rawQuery) { event in
+            CommandPaletteQuery(query: $rawQuery, placeholder: placeholder) { event in
                 switch event {
                 case .exit:
                     isPresented = false
@@ -185,11 +190,13 @@ struct CommandPaletteView: View {
 /// The text field for building the query for the command palette.
 private struct CommandPaletteQuery: View {
     @Binding var query: String
+    var placeholder: String
     var onEvent: ((KeyboardEvent) -> Void)?
     @FocusState private var isTextFieldFocused: Bool
 
-    init(query: Binding<String>, onEvent: ((KeyboardEvent) -> Void)? = nil) {
+    init(query: Binding<String>, placeholder: String, onEvent: ((KeyboardEvent) -> Void)? = nil) {
         _query = query
+        self.placeholder = placeholder
         self.onEvent = onEvent
     }
 
@@ -219,7 +226,7 @@ private struct CommandPaletteQuery: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
 
-            TextField("Execute a command…", text: $query)
+            TextField(placeholder, text: $query)
                 .padding()
                 .font(.system(size: 20, weight: .light))
                 .frame(height: 48)
@@ -347,50 +354,58 @@ private struct CommandRow: View {
         return Text(attributed)
     }
 
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if let color = option.leadingColor {
-                    Circle()
-                        .fill(color)
-                        .frame(width: 8, height: 8)
-                }
+    private var standardRow: some View {
+        HStack(spacing: 8) {
+            if let color = option.leadingColor {
+                Circle()
+                    .fill(color)
+                    .frame(width: 8, height: 8)
+            }
 
-                if let icon = option.leadingIcon {
-                    Image(systemName: icon)
-                        .foregroundStyle(option.emphasis ? Color.accentColor : .secondary)
-                        .font(.system(size: 14, weight: .medium))
-                }
+            if let icon = option.leadingIcon {
+                Image(systemName: icon)
+                    .foregroundStyle(option.emphasis ? Color.accentColor : .secondary)
+                    .font(.system(size: 14, weight: .medium))
+            }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    highlightedTitle
+            VStack(alignment: .leading, spacing: 2) {
+                highlightedTitle
 
-                    if let subtitle = option.subtitle ?? option.description {
-                        highlightedSubtitle(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Spacer()
-
-                if let badge = option.badge, !badge.isEmpty {
-                    Text(badge)
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule().fill(Color.accentColor.opacity(0.15))
-                        )
-                        .foregroundStyle(Color.accentColor)
-                }
-
-                if let symbols = option.symbols {
-                    ShortcutSymbolsView(symbols: symbols)
+                if let subtitle = option.subtitle ?? option.description {
+                    highlightedSubtitle(subtitle)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(8)
+
+            Spacer()
+
+            if let badge = option.badge, !badge.isEmpty {
+                Text(badge)
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule().fill(Color.accentColor.opacity(0.15))
+                    )
+                    .foregroundStyle(Color.accentColor)
+            }
+
+            if let symbols = option.symbols {
+                ShortcutSymbolsView(symbols: symbols)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if let row = option.row { row } else { standardRow }
+            }
+            // A custom row is one line of text, as in the sidebar.
+            .padding(.horizontal, 8)
+            .padding(.vertical, option.row == nil ? 8 : 1)
             .contentShape(Rectangle())
             .background(
                 isSelected

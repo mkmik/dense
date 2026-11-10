@@ -9,6 +9,12 @@ struct AboutView: View {
     /// Read the commit from the bundle.
     private var build: String? { Bundle.main.infoDictionary?["CFBundleVersion"] as? String }
     private var commit: String? { Bundle.main.infoDictionary?["GhosttyCommit"] as? String }
+    /// When the app was built, in local time. Set by `zig build`; empty from Xcode.
+    private var buildDate: String? {
+        guard let raw = Bundle.main.infoDictionary?["DenseBuildDate"] as? String,
+              let date = ISO8601DateFormatter().date(from: raw) else { return nil }
+        return date.formatted(date: .abbreviated, time: .standard)
+    }
     private var version: String? { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String }
 
     private enum VersionConfig {
@@ -103,6 +109,9 @@ struct AboutView: View {
                     }
                     if let build {
                         PropertyRow(label: "Build", text: build)
+                    }
+                    if let buildDate {
+                        PropertyRow(label: "Built", text: buildDate)
                     }
                     if let commit, commit != "",
                        let url = githubURL?.appendingPathComponent("/commits/\(commit)") {

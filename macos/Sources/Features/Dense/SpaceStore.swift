@@ -5,6 +5,7 @@ import Network
 struct ObjectMeta: Decodable, Equatable {
     var name: String
     var namespace: String?
+    var annotations: [String: String]?
 }
 
 /// An object stored in dennet (`den.mkm.pub/v1alpha1`). Only the fields dense uses are
@@ -18,7 +19,7 @@ extension DennetObject {
     var id: String { objectID(metadata.namespace, metadata.name) }
 }
 
-private func objectID(_ namespace: String?, _ name: String) -> String { "\(namespace ?? "")/\(name)" }
+func objectID(_ namespace: String?, _ name: String) -> String { "\(namespace ?? "")/\(name)" }
 
 /// One node of the sidebar tree.
 struct Space: DennetObject {
@@ -30,6 +31,10 @@ struct Space: DennetObject {
         var badges: [Badge]?
         var state: String?
         var collapsed: Bool?
+        /// Free-form labels. Not shown; the sidebar filter can match them with "#tag".
+        var tags: [String]?
+        /// Where dens for this Space's tabs start; unset means the nearest Space above's.
+        var workingDir: String?
     }
 
     struct Badge: Decodable, Equatable {
@@ -61,28 +66,124 @@ struct Surface: DennetObject {
     var spec: Spec
 }
 
+/// A program in a tab asking dense to show a Space, or a tab of one: the
+/// `dense.mkm.pub/show` annotation on that tab's Surface, as JSON
+/// `{"space": name, "surface": name, "at": time}`, names in the Surface's namespace. A
+/// tab alone is enough; its Space is found from it. The time is there only so that every
+/// request is a change to the annotation, even one asking for what the last one did.
+///
+/// Only the window that was just typed into the tab that asks does what it says (see
+/// `SpaceTabs.obeys`), so each window keeps showing what it shows otherwise. Nothing in
+/// dennet says what a window shows.
+struct ShowRequest: Decodable, Equatable {
+    static let annotation = "dense.mkm.pub/show"
+
+    /// The id of the Surface that asks.
+    var from = ""
+    /// The ids of the Space and the tab to show.
+    var space: String?
+    var surface: String?
+
+    enum CodingKeys: CodingKey { case space, surface }
+
+    /// The request on a Surface, if it has one.
+    init?(_ asking: Surface) {
+        guard let json = asking.metadata.annotations?[Self.annotation],
+              let names = try? JSONDecoder().decode(Self.self, from: Data(json.utf8)),
+              names.space != nil || names.surface != nil else { return nil }
+        let namespace = asking.metadata.namespace
+        from = asking.id
+        space = names.space.map { objectID(namespace, $0) }
+        surface = names.surface.map { objectID(namespace, $0) }
+    }
+}
+
 /// A terminal session, run by den. dense creates Dens and reads their status, which den
 /// (or dennet) keeps up to date.
 struct Den: DennetObject {
+    struct Spec: Decodable, Equatable {
+        /// The program and its arguments; nil runs the user's shell.
+        var command: [String]?
+    }
+
     struct Status: Decodable, Equatable {
         /// Pending, Running, Exited, Failed or Lost.
         var phase: String?
         /// den's control socket.
         var socket: String?
+        /// Whether the terminal's title is one a coding agent sets. Kept instead of the title,
+        /// which an agent animates while it works, so the Den only changes when this does.
+        var agentTitle = false
+
+        enum CodingKeys: CodingKey { case phase, socket, title }
+
+        init(phase: String? = nil, socket: String? = nil, title: String? = nil) {
+            self.phase = phase
+            self.socket = socket
+            agentTitle = title.map(Den.agentTitle) ?? false
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(phase: try c.decodeIfPresent(String.self, forKey: .phase),
+                      socket: try c.decodeIfPresent(String.self, forKey: .socket),
+                      title: try c.decodeIfPresent(String.self, forKey: .title))
+        }
     }
 
     var metadata: ObjectMeta
+    var spec: Spec?
     var status: Status?
 
     /// Whether the den runs and has a socket to attach to.
     var running: Bool { status?.phase == "Running" && status?.socket?.isEmpty == false }
+
+    /// Whether the den runs a coding agent: a word of its command is one, as in
+    /// ["claude"] or ["/bin/zsh", "-lic", "claude --resume ID; exec /bin/zsh -l"], or one
+    /// started in its shell has set the terminal's title (see `agentTitle`).
+    // ponytail: only these names, and only Claude Code's titles; an agent that leaves the
+    // title alone, like codex, is seen only from the command. If guessing falls short, den
+    // could report the terminal's foreground program in its status.
+    var agent: Bool {
+        status?.agentTitle == true || (spec?.command ?? []).contains { arg in
+            arg.split(whereSeparator: { $0.isWhitespace || $0 == ";" || $0 == "&" || $0 == "|" })
+                .contains { ["claude", "codex"].contains($0.split(separator: "/").last.map(String.init) ?? "") }
+        }
+    }
+}
+
+extension Den {
+    /// Whether a terminal title is one Claude Code sets: a glyph, a space, then the task,
+    /// as in "✳ logo" when it waits or "◐ more" while it works (the glyph spins).
+    static func agentTitle(_ title: String) -> Bool {
+        guard let glyph = title.unicodeScalars.first, title.unicodeScalars.dropFirst().first == " " else { return false }
+        return "✳✢✶✻✽◐◓◑◒".unicodeScalars.contains(glyph) || (0x2801...0x28FF).contains(glyph.value)
+    }
+}
+
+/// Another machine running dennet. Cluster-scoped: its objects show up here in the
+/// namespace named after it. Named so as not to clash with Foundation's Host.
+struct DennetHost: DennetObject {
+    struct Spec: Decodable, Equatable {
+        /// The ssh destination: [user@]host, an alias from ~/.ssh/config, or ssh://...
+        var ssh: String
+        /// The dennet socket there, if not where dennet puts it by default.
+        var socketPath: String?
+        /// den there; without it, den is found on the PATH of a login, interactive shell there.
+        var denPath: String?
+    }
+
+    var metadata: ObjectMeta
+    var spec: Spec
 }
 
 extension Space {
-    /// A sidebar row: a space and how deep it sits in the tree.
+    /// A sidebar row: a space, how deep it sits in the tree, and the id of the row it sits
+    /// under ("" at the top level). Rows with the same parent are siblings.
     struct Row: Identifiable, Equatable {
         let space: Space
         let depth: Int
+        let parent: String
         var id: String { space.id }
     }
 
@@ -102,12 +203,69 @@ extension Space {
                 ($0.spec.order ?? 0, $0.metadata.name) < ($1.spec.order ?? 0, $1.metadata.name)
             }
             for space in sorted {
-                rows.append(Row(space: space, depth: depth))
+                rows.append(Row(space: space, depth: depth, parent: parent))
                 if space.spec.collapsed != true { add(space.id, depth + 1) }
             }
         }
         add("", 0)
         return rows
+    }
+
+    /// Where tree lines go for each row, by row id. A line runs down through level k
+    /// (1 ..< depth) while the row's ancestor at depth k has siblings still to come, and the
+    /// row's own connector is "└" when it is its parent's last row, else "├".
+    struct Guide: Equatable {
+        var through: [Bool]
+        var last: Bool
+    }
+
+    static func guides(_ rows: [Row]) -> [String: Guide] {
+        var lastAt: [Int: Bool] = [:]
+        var guides: [String: Guide] = [:]
+        for (i, row) in rows.enumerated() {
+            // Last unless a sibling comes before the rows leave this row's parent.
+            let last = !rows[(i + 1)...].prefix { $0.depth >= row.depth }.contains { $0.depth == row.depth }
+            lastAt[row.depth] = last
+            guides[row.id] = Guide(through: (0..<row.depth).map { $0 > 0 && lastAt[$0] == false }, last: last)
+        }
+        return guides
+    }
+
+    /// The working directory for a new tab in `space`: its own, else the nearest one set
+    /// on a Space above it in `spaces`. dennet leaves the inheriting to whoever makes dens.
+    static func workingDir(of space: Space, in spaces: [String: Space]) -> String? {
+        var seen: Set<String> = []
+        var current: Space? = space
+        while let s = current, seen.insert(s.id).inserted {
+            if let dir = s.spec.workingDir, !dir.isEmpty { return dir }
+            current = s.spec.parent.flatMap { spaces[objectID(s.metadata.namespace, $0)] }
+        }
+        return nil
+    }
+
+    /// The rows a sidebar filter keeps. Words of the query that start with "#" are tags: a
+    /// row is kept if it, or a Space above it, has one of those tags exactly, so a tagged
+    /// Space brings its subspaces along. The other words, together, must be in the title.
+    /// The Spaces above a kept row stay too, to show where it is.
+    static func filter(_ rows: [Row], _ query: String) -> [Row] {
+        let words = query.split(whereSeparator: \.isWhitespace)
+        let tags = Set(words.filter { $0.hasPrefix("#") && $0.count > 1 }.map { String($0.dropFirst()) })
+        let text = words.filter { !$0.hasPrefix("#") }.joined(separator: " ")
+        guard !tags.isEmpty || !text.isEmpty else { return rows }
+
+        let parents = Dictionary(rows.map { ($0.id, $0.parent) }) { a, _ in a }
+        // Rows come after the row above them, so a parent's answer is known first.
+        var tagged: [String: Bool] = [:]
+        var keep = Set<String>()
+        for row in rows {
+            tagged[row.id] = !Set(row.space.spec.tags ?? []).isDisjoint(with: tags) || tagged[row.parent] == true
+            guard tags.isEmpty || tagged[row.id] == true,
+                  text.isEmpty || (row.space.spec.title ?? row.space.metadata.name).localizedCaseInsensitiveContains(text)
+            else { continue }
+            var id: String? = row.id
+            while let current = id, !current.isEmpty, keep.insert(current).inserted { id = parents[current] }
+        }
+        return rows.filter { keep.contains($0.id) }
     }
 
     /// This space's terminal Surfaces, sorted by order, then name.
@@ -120,6 +278,10 @@ extension Space {
 
 /// Watches the Spaces, Surfaces and Dens in dennet and keeps `spaces`, `surfaces` and
 /// `dens` up to date.
+///
+/// dennet's lists across all namespaces have only this machine's objects. So for each
+/// Host it also watches the Host's namespace, which dennet forwards to that machine, and
+/// stops when the Host goes away.
 ///
 /// It speaks HTTP/1.0 over dennet's Unix socket. With HTTP/1.0 the server sends a watch
 /// as plain JSON lines, one event per line, and closes the connection when the watch ends.
@@ -138,12 +300,57 @@ final class SpaceStore: ObservableObject {
     /// Dens by `id`.
     @Published private(set) var dens: [String: Den] = [:]
 
+    /// Hosts by `id`.
+    @Published private(set) var hosts: [String: DennetHost] = [:] {
+        didSet {
+            let names = Set(hosts.values.map(\.metadata.name))
+            queue.async { self.watchHosts(names) }
+        }
+    }
+
+    /// Requests to show a Space or tab, as they come in. Only changes are sent: a request
+    /// already there when a watch starts, or starts again, is old.
+    let showRequests = PassthroughSubject<ShowRequest, Never>()
+
     /// Why dennet can't be reached right now, or nil while the watches are running.
     @Published private(set) var problem: String?
+
+    /// Why a Host can't be reached right now, by Host name.
+    @Published private(set) var hostProblems: [String: String] = [:]
+
+    /// The names of the Hosts, sorted.
+    var hostNames: [String] { hosts.values.map(\.metadata.name).sorted() }
+
+    /// The Spaces on a Host, or on this machine for nil.
+    func spaces(on host: String?) -> [Space] {
+        let names = Set(hosts.values.map(\.metadata.name))
+        return spaces.values.filter { space in
+            guard let host else { return !names.contains(space.metadata.namespace ?? "default") }
+            return space.metadata.namespace == host
+        }
+    }
+
+    /// The ids each watch put in its list, by watch key ("namespace/resource", "*" for
+    /// all namespaces), so a watch replaces only its own objects. Main thread only.
+    private var owned: [String: Set<String>] = [:]
+
+    /// The open watch connections by key, and the Hosts being watched. Queue only.
+    private var connections: [String: NWConnection] = [:]
+    private var watchedHosts: Set<String> = []
 
     /// True once all the lists have arrived from dennet for the first time.
     @Published private(set) var loaded = false
     private var loadedLists: Set<String> = []
+
+    /// The Hosts whose lists have all arrived, and each Host's lists so far.
+    @Published private(set) var loadedHosts: Set<String> = []
+    private var hostLoadedLists: [String: Set<String>] = [:]
+
+    /// Whether the lists for a Space's machine have arrived, so it shows all its tabs.
+    func loaded(_ space: Space) -> Bool {
+        let namespace = space.metadata.namespace ?? "default"
+        return hosts.values.contains { $0.metadata.name == namespace } ? loadedHosts.contains(namespace) : loaded
+    }
 
     let socketPath: String
     private let queue = DispatchQueue(label: "pub.mkm.dense.dennet")
@@ -154,7 +361,34 @@ final class SpaceStore: ObservableObject {
             self.watch("spaces", \.spaces)
             self.watch("surfaces", \.surfaces)
             self.watch("dens", \.dens)
+            self.watch("hosts", \.hosts)
         }
+    }
+
+    /// Starts watching new Hosts' namespaces and stops watching gone ones. On the queue.
+    private func watchHosts(_ names: Set<String>) {
+        for gone in watchedHosts.subtracting(names) {
+            for resource in ["spaces", "surfaces", "dens"] { connections["\(gone)/\(resource)"]?.cancel() }
+            DispatchQueue.main.async {
+                for resource in ["spaces", "surfaces", "dens"] {
+                    let ids = self.owned.removeValue(forKey: "\(gone)/\(resource)") ?? []
+                    for id in ids {
+                        self.spaces[id] = nil
+                        self.surfaces[id] = nil
+                        self.dens[id] = nil
+                    }
+                }
+                self.hostProblems[gone] = nil
+                self.hostLoadedLists[gone] = nil
+                self.loadedHosts.remove(gone)
+            }
+        }
+        for new in names.subtracting(watchedHosts) {
+            watch("spaces", in: new, \.spaces)
+            watch("surfaces", in: new, \.surfaces)
+            watch("dens", in: new, \.dens)
+        }
+        watchedHosts = names
     }
 
     /// The Den a terminal Surface attaches to, if dennet has it.
@@ -257,15 +491,24 @@ final class SpaceStore: ObservableObject {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private func watch<Object: DennetObject>(_ resource: String, _ list: ReferenceWritableKeyPath<SpaceStore, [String: Object]>) {
+    /// Watches one resource, in all namespaces or in a Host's namespace. On the queue.
+    private func watch<Object: DennetObject>(
+        _ resource: String,
+        in host: String? = nil,
+        _ list: ReferenceWritableKeyPath<SpaceStore, [String: Object]>
+    ) {
+        let key = "\(host ?? "*")/\(resource)"
         let conn = NWConnection(to: .unix(path: socketPath), using: .tcp)
+        connections[key] = conn
         var buffer = Data()
         var streaming = false
         // The full list being rebuilt from the watch's initial events; nil once it is live.
         var initial: [String: Object]? = [:]
 
         func fail(_ message: String) {
-            DispatchQueue.main.async { self.problem = message }
+            DispatchQueue.main.async {
+                if let host { self.hostProblems[host] = message } else { self.problem = message }
+            }
             conn.cancel()
         }
 
@@ -289,10 +532,20 @@ final class SpaceStore: ObservableObject {
                         if event.type == "BOOKMARK" {
                             initial = nil
                             DispatchQueue.main.async {
-                                self[keyPath: list] = objects
-                                self.problem = nil
-                                self.loadedLists.insert(resource)
-                                if !self.loaded && self.loadedLists.count == 3 { self.loaded = true }
+                                var all = self[keyPath: list]
+                                for id in self.owned[key] ?? [] { all[id] = nil }
+                                all.merge(objects) { $1 }
+                                self.owned[key] = Set(objects.keys)
+                                self[keyPath: list] = all
+                                if let host {
+                                    self.hostProblems[host] = nil
+                                    self.hostLoadedLists[host, default: []].insert(resource)
+                                    if self.hostLoadedLists[host]?.count == 3 { self.loadedHosts.insert(host) }
+                                } else {
+                                    self.problem = nil
+                                    self.loadedLists.insert(resource)
+                                    if !self.loaded && self.loadedLists.count == 4 { self.loaded = true }
+                                }
                             }
                         } else if let object = event.object {
                             initial?[object.id] = object
@@ -302,6 +555,13 @@ final class SpaceStore: ObservableObject {
                         DispatchQueue.main.async {
                             // A Den's status changes often in fields dense doesn't read.
                             let new = deleted ? nil : object
+                            if let surface = new as? Surface,
+                               let ask = surface.metadata.annotations?[ShowRequest.annotation],
+                               ask != self.surfaces[surface.id]?.metadata.annotations?[ShowRequest.annotation],
+                               let request = ShowRequest(surface) {
+                                self.showRequests.send(request)
+                            }
+                            if deleted { self.owned[key]?.remove(object.id) } else { self.owned[key, default: []].insert(object.id) }
                             if self[keyPath: list][object.id] != new { self[keyPath: list][object.id] = new }
                         }
                     }
@@ -316,13 +576,19 @@ final class SpaceStore: ObservableObject {
         conn.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                let path = "/apis/den.mkm.pub/v1alpha1/\(resource)?watch=1&sendInitialEvents=true&allowWatchBookmarks=true&resourceVersionMatch=NotOlderThan"
+                let scope = host.map { "namespaces/\($0)/" } ?? ""
+                let path = "/apis/den.mkm.pub/v1alpha1/\(scope)\(resource)?watch=1&sendInitialEvents=true&allowWatchBookmarks=true&resourceVersionMatch=NotOlderThan"
                 conn.send(content: Data("GET \(path) HTTP/1.0\r\nHost: dennet\r\n\r\n".utf8), completion: .idempotent)
                 receive()
             case .waiting(let error), .failed(let error):
                 fail("dennet: \(error) (\(self.socketPath))")
             case .cancelled:
-                self.queue.asyncAfter(deadline: .now() + 2) { self.watch(resource, list) }
+                // Reconnect, unless the Host is gone or another watch has taken over.
+                if self.connections[key] === conn { self.connections[key] = nil }
+                self.queue.asyncAfter(deadline: .now() + 2) {
+                    guard self.connections[key] == nil, host.map(self.watchedHosts.contains) ?? true else { return }
+                    self.watch(resource, in: host, list)
+                }
             default:
                 break
             }

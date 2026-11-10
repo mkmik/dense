@@ -167,26 +167,26 @@
                                     <action selector="newTab:" target="-1" id="KoW-K7-hw5"/>
                                 </connections>
                             </menuItem>
-                            <menuItem isSeparatorItem="YES" id="m54-Is-iLE"/>
-                            <menuItem title="Split Right" id="VUR-Ld-nLx">
+                            <menuItem isSeparatorItem="YES" hidden="YES" id="m54-Is-iLE"/>
+                            <menuItem title="Split Right" hidden="YES" id="VUR-Ld-nLx">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="splitRight:" target="-1" id="cv2-Xg-FR4"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="Split Left" id="Ppv-GP-lQU">
+                            <menuItem title="Split Left" hidden="YES" id="Ppv-GP-lQU">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="splitLeft:" target="-1" id="Cey-Mf-bD2"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="Split Down" id="UDZ-4y-6xL">
+                            <menuItem title="Split Down" hidden="YES" id="UDZ-4y-6xL">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="splitDown:" target="-1" id="Zej-CF-6nO"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="Split Up" id="Ggp-7N-GbX">
+                            <menuItem title="Split Up" hidden="YES" id="Ggp-7N-GbX">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="splitUp:" target="-1" id="bbi-dK-pOS"/>

@@ -628,9 +628,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     override func syncAppearance() {
         // When our focus changes, we update our window appearance based on the
-        // currently focused surface.
-        guard let focusedSurface else { return }
-        syncAppearance(focusedSurface.derivedConfig)
+        // currently focused surface. dense: a window can show a Space with no
+        // terminal, even as it opens; then the app config sets the window's background,
+        // or it would keep the system's white or dark one.
+        syncAppearance(focusedSurface?.derivedConfig ?? .init(ghostty.config))
     }
 
     private func syncAppearance(_ surfaceConfig: Ghostty.SurfaceView.DerivedConfig) {
@@ -686,8 +687,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             return
         }
 
-        // dense: closing a Space's tab drops the tab, not the window.
-        if spaceTabs.closeActiveTab() { return }
+        // dense: closing a Space's tab closes or detaches the tab, not the window. Ghostty
+        // asks for confirmation while den attach runs, so the user closed it; else it exited.
+        if spaceTabs.closeActiveTab(ask: withConfirmation) { return }
 
         // More than 1 window means we have tabs and we're closing a tab
         if window?.tabGroup?.windows.count ?? 0 > 1 {
@@ -1082,6 +1084,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     /// dense: the Space shown in this window and its tabs.
     lazy var spaceTabs = SpaceTabs(controller: self)
 
+    /// View > Open Space… (⌘O): the command palette, listing only the Spaces.
+    @IBAction func openSpace(_ sender: Any?) {
+        showCommandPalette(spacesOnly: true)
+    }
+
     override func windowDidLoad() {
         super.windowDidLoad()
         guard let window else { return }
@@ -1320,8 +1327,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     @IBAction func closeTab(_ sender: Any?) {
-        // dense: close the Space's tab, not the window.
-        if spaceTabs.closeActiveTab() { return }
+        // dense: close or detach the Space's tab, not the window.
+        if spaceTabs.closeActiveTab(ask: true) { return }
 
         guard let window = window else { return }
         guard window.tabGroup?.windows.count ?? 0 > 1 else {
@@ -1519,7 +1526,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
         // When our focus changes, we update our window appearance based on the
         // currently focused surface.
-        guard let focusedSurface else { return }
+        guard let focusedSurface else { return syncAppearance() }
         syncAppearance(focusedSurface.derivedConfig)
 
         // We also want to get notified of certain changes to update our appearance.

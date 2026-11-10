@@ -63,7 +63,15 @@ pub fn init(
         step.has_side_effects = true;
         step.cwd = b.path("macos");
         step.environ_map = env_map;
+        // dense: xcodebuild gets the build time as a build setting, which
+        // Ghostty-Info.plist puts in DenseBuildDate for the About window. A shell
+        // adds it at the end so it is the time of this build, not of `zig build`'s
+        // configure step.
         step.addArgs(&.{
+            "/bin/sh",
+            "-c",
+            "exec \"$@\" DENSE_BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"",
+            "sh",
             "xcodebuild",
             "-target",
             "Ghostty",

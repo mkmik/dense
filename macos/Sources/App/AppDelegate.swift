@@ -238,6 +238,9 @@ class AppDelegate: NSObject,
         // This registers the Ghostty => Services menu to exist.
         NSApp.servicesMenu = menuServices
 
+        // dense: the sidebar's items, in the View menu.
+        if let view = menuChangeTitle?.menu { SidebarMenu.install(in: view) }
+
         // Setup a local event monitor for app-level keyboard shortcuts. See
         // localEventHandler for more info why.
         _ = NSEvent.addLocalMonitorForEvents(

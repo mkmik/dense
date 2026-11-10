@@ -46,6 +46,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>DenseBuildDate</key>
+	<string>$(DENSE_BUILD_DATE)</string>
 	<key>GhosttyBuild</key>
 	<string></string>
 	<key>GhosttyCommit</key>

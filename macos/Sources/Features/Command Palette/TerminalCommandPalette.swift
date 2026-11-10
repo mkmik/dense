@@ -24,6 +24,9 @@ struct TerminalCommandPaletteView: View {
     /// result in the view disappearing.
     @Binding var isPresented: Bool
 
+    /// dense: list only the Spaces, to open one (⌘O).
+    var spacesOnly = false
+
     /// The configuration so we can lookup keyboard shortcuts.
     @ObservedObject var ghosttyConfig: Ghostty.Config
 
@@ -46,7 +49,8 @@ struct TerminalCommandPaletteView: View {
                         CommandPaletteView(
                             isPresented: $isPresented,
                             backgroundColor: ghosttyConfig.backgroundColor,
-                            options: commandOptions
+                            options: spacesOnly ? spaceOptions : commandOptions,
+                            placeholder: spacesOnly ? "Open a Space…" : "Execute a command…"
                         )
                         .zIndex(1) // Ensure it's on top
 
@@ -79,7 +83,7 @@ struct TerminalCommandPaletteView: View {
         // Sort the rest. We replace ":" with a character that sorts before space
         // so that "Foo:" sorts before "Foo Bar:". Use sortKey as a tie-breaker
         // for stable ordering when titles are equal.
-        options.append(contentsOf: sortedTerminalPaletteOptions(jumpOptions + terminalOptions))
+        options.append(contentsOf: sortedTerminalPaletteOptions(jumpOptions + terminalOptions + denseOptions))
         return options
     }
 
@@ -139,6 +143,17 @@ struct TerminalCommandPaletteView: View {
                     onAction(c.action)
                 }
             }
+    }
+
+    /// dense's Space and tab commands, for the window this palette is in.
+    private var denseOptions: [CommandOption] {
+        (surfaceView.window?.windowController as? TerminalController)?.spaceTabs.paletteOptions ?? []
+    }
+
+    /// Every Space, drawn as in the sidebar, for Open Space.
+    private var spaceOptions: [CommandOption] {
+        guard let tabs = (surfaceView.window?.windowController as? TerminalController)?.spaceTabs else { return [] }
+        return tabs.openOptions(look: TerminalLook(config: ghosttyConfig, font: tabs.font))
     }
 
     /// Commands for jumping to other terminal surfaces.

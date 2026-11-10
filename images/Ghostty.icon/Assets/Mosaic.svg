@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="45 45 1120 1120" width="1024" height="1024">
+  <!-- dense icon (E · Mosaic, Coral): the tiles on a 1024 point canvas. The blue
+       gradient behind them is the icon's fill in icon.json. -->
+  <defs>
+    <filter id="lift" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#7a1f30" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#lift)">
+    <rect x="177" y="180" width="543" height="542" rx="26" fill="#fff6ec"/>
+    <rect x="738" y="180" width="297" height="260" rx="22" fill="#ffd470"/>
+    <rect x="738" y="461" width="297" height="261" rx="22" fill="#f07a78"/>
+    <rect x="177" y="742" width="261" height="296" rx="22" fill="#ffd9e6"/>
+    <rect x="458" y="742" width="262" height="296" rx="22" fill="#f07a78"/>
+    <rect x="738" y="742" width="139" height="138" rx="18" fill="#9ff0d8"/>
+    <rect x="897" y="742" width="138" height="138" rx="18" fill="#ffd470"/>
+    <rect x="738" y="900" width="139" height="138" rx="18" fill="#ffd9e6"/>
+    <rect x="897" y="900" width="59" height="58" rx="12" fill="#9ff0d8"/>
+    <rect x="976" y="900" width="59" height="58" rx="12" fill="#f07a78"/>
+    <rect x="897" y="980" width="59" height="58" rx="12" fill="#ffd470"/>
+    <rect x="976" y="980" width="59" height="58" rx="12" fill="#9ff0d8"/>
+  </g>
+
+  <!-- The terminal: three lines of text, then the prompt. -->
+  <g fill="#ad9294">
+    <rect x="217" y="228" width="203" height="24" rx="8"/>
+    <rect x="217" y="274" width="313" height="24" rx="8"/>
+    <rect x="217" y="321" width="163" height="24" rx="8"/>
+  </g>
+  <polyline points="258,505 352,572 258,640" fill="none" stroke="#491626" stroke-width="46"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="387" y="609" width="154" height="46" rx="12" fill="#491626"/>
+
+  <g fill="#74503f">
+    <rect x="766" y="214" width="122" height="20" rx="6"/>
+    <rect x="766" y="250" width="191" height="20" rx="6"/>
+    <rect x="766" y="286" width="82" height="18" rx="6"/>
+    <rect x="916" y="767" width="68" height="13" rx="4"/>
+    <rect x="916" y="791" width="95" height="13" rx="4"/>
+  </g>
+  <g fill="#ffb3a8">
+    <rect x="766" y="496" width="122" height="19" rx="6"/>
+    <rect x="766" y="532" width="191" height="19" rx="6"/>
+    <rect x="766" y="567" width="82" height="18" rx="6"/>
+    <rect x="485" y="777" width="122" height="19" rx="6"/>
+    <rect x="485" y="813" width="177" height="19" rx="6"/>
+    <rect x="485" y="849" width="81" height="18" rx="6"/>
+  </g>
+  <g fill="#6a4553">
+    <rect x="204" y="777" width="122" height="19" rx="6"/>
+    <rect x="204" y="813" width="176" height="19" rx="6"/>
+    <rect x="204" y="849" width="81" height="18" rx="6"/>
+    <rect x="758" y="767" width="68" height="13" rx="4"/>
+    <rect x="758" y="791" width="95" height="13" rx="4"/>
+    <rect x="758" y="925" width="68" height="12" rx="4"/>
+    <rect x="758" y="950" width="95" height="12" rx="4"/>
+  </g>
+</svg>

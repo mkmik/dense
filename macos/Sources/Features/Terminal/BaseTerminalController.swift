@@ -56,6 +56,9 @@ class BaseTerminalController: NSWindowController,
     /// This can be set to show/hide the command palette.
     @Published var commandPaletteIsShowing: Bool = false
 
+    /// dense: the command palette lists only the Spaces, to open one (⌘O).
+    @Published var commandPaletteSpacesOnly = false
+
     /// Set if the terminal view should show the update overlay.
     @Published var updateOverlayIsVisible: Bool = false
 
@@ -277,6 +280,8 @@ class BaseTerminalController: NSWindowController,
         }
     }
 
+    static let splitsDisabled = true
+
     /// Create a new split.
     @discardableResult
     func newSplit(
@@ -284,6 +289,11 @@ class BaseTerminalController: NSWindowController,
         direction: SplitTree<Ghostty.SurfaceView>.NewDirection,
         baseConfig config: Ghostty.SurfaceConfiguration? = nil
     ) -> Ghostty.SurfaceView? {
+        // dense: no splits. dennet doesn't model them, so a split's shell isn't a den and is
+        // lost on quit. Every way to make one (menu, keybinding, command palette, AppleScript,
+        // Shortcuts) ends up here. Delete this line to bring them back.
+        if Self.splitsDisabled { return nil }
+
         // We can only create new splits for surfaces in our tree.
         guard surfaceTree.root?.node(view: oldView) != nil else { return nil }
 
@@ -1427,6 +1437,17 @@ class BaseTerminalController: NSWindowController,
     }
 
     @IBAction func toggleCommandPalette(_ sender: Any?) {
+        showCommandPalette(spacesOnly: false)
+    }
+
+    /// Shows the command palette, or the Spaces only, or hides it. Asking for the other
+    /// kind while one shows switches to it.
+    func showCommandPalette(spacesOnly: Bool) {
+        if commandPaletteIsShowing && commandPaletteSpacesOnly != spacesOnly {
+            commandPaletteSpacesOnly = spacesOnly
+            return
+        }
+        commandPaletteSpacesOnly = spacesOnly
         commandPaletteIsShowing.toggle()
         if commandPaletteIsShowing {
             // Fix the incorrect focus when toggling from InlineTitleEditor
