@@ -118,6 +118,7 @@ struct SpaceSidebar: View {
             .padding(.horizontal, 8)
             .coordinateSpace(name: "spaces")
             .onPreferenceChange(RowMiddles.self) { middles = $0 }
+            .background(NoBounce())
         }
     }
 
@@ -226,6 +227,35 @@ private struct TreeLines: View {
     /// The middle of the column the line down for `level` (1 ...) runs in.
     private func x(_ level: Int) -> CGFloat {
         (CGFloat(5 * level - 3) + 0.5) * cell.width
+    }
+}
+
+/// Turns off the rubber-band bounce of the scroll view it sits in, for this scroll view
+/// only. SwiftUI's scrollBounceBehavior(.basedOnSize) still bounces once the content is
+/// taller than the view, and SwiftUI sets the scroll view's elasticity back on every
+/// update, so this watches it and puts it back to none each time.
+private struct NoBounce: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { View() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class View: NSView {
+        private var watches: [NSKeyValueObservation] = []
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            watches = []
+            guard let scrollView = enclosingScrollView else { return }
+            scrollView.verticalScrollElasticity = .none
+            scrollView.horizontalScrollElasticity = .none
+            watches = [
+                scrollView.observe(\.verticalScrollElasticity) { view, _ in
+                    if view.verticalScrollElasticity != .none { view.verticalScrollElasticity = .none }
+                },
+                scrollView.observe(\.horizontalScrollElasticity) { view, _ in
+                    if view.horizontalScrollElasticity != .none { view.horizontalScrollElasticity = .none }
+                },
+            ]
+        }
     }
 }
 

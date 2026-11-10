@@ -202,6 +202,8 @@ private struct SurfaceTabBar: View {
                         Color.clear.preference(key: TabMiddles.self, value: [surface.id: g.frame(in: .named("tabs")).midX])
                     })
                     .contextMenu {
+                        Button("Rename Tab…") { tabs.renameTab(surface) }
+                        Divider()
                         Button("Close Tab…", role: .destructive) { tabs.closeTab(surface) }
                     }
                     .offset(x: dx ?? 0)

@@ -687,8 +687,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             return
         }
 
-        // dense: closing a Space's tab drops the tab, not the window.
-        if spaceTabs.closeActiveTab() { return }
+        // dense: closing a Space's tab closes or detaches the tab, not the window. Ghostty
+        // asks for confirmation while den attach runs, so the user closed it; else it exited.
+        if spaceTabs.closeActiveTab(ask: withConfirmation) { return }
 
         // More than 1 window means we have tabs and we're closing a tab
         if window?.tabGroup?.windows.count ?? 0 > 1 {
@@ -1321,8 +1322,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     @IBAction func closeTab(_ sender: Any?) {
-        // dense: close the Space's tab, not the window.
-        if spaceTabs.closeActiveTab() { return }
+        // dense: close or detach the Space's tab, not the window.
+        if spaceTabs.closeActiveTab(ask: true) { return }
 
         guard let window = window else { return }
         guard window.tabGroup?.windows.count ?? 0 > 1 else {

@@ -42,6 +42,10 @@ final class SpaceTabs: ObservableObject {
     /// The tab last in front in each Space, by Space id.
     private var lastTab: [String: String]
 
+    /// The tabs shown in each Space, by Space id, most recent last, so closing tabs one
+    /// after another goes back through them in turn.
+    private var recent: [String: [String]] = [:]
+
     /// Text to type into a new tab once it is attached, by Surface id.
     private var pendingInput: [String: String] = [:]
 
@@ -104,7 +108,11 @@ final class SpaceTabs: ObservableObject {
         if let active { trees[active] = controller.surfaceTree }
 
         active = surface?.id
-        if let selected, let surface { lastTab[selected] = surface.id }
+        if let selected, let surface {
+            lastTab[selected] = surface.id
+            recent[selected, default: []].removeAll { $0 == surface.id }
+            recent[selected, default: []].append(surface.id)
+        }
         UserDefaults.standard.set(selected, forKey: Self.selectedKey)
         UserDefaults.standard.set(lastTab, forKey: Self.lastTabKey)
 
@@ -133,18 +141,38 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
-    /// Called when the terminal filling the window is closing (den attach exited, or the
-    /// user closed it). If it is a tab, the tab is dropped and the next one is shown, and
-    /// this returns true. Otherwise it returns false and the window closes as usual.
-    func closeActiveTab() -> Bool {
+    /// Called when the tab in front is to close: the user closed it (⌘W, File > Close Tab),
+    /// or its den attach exited. If there is a tab in front this returns true, and
+    /// otherwise false, so the window closes as usual.
+    ///
+    /// With `ask`, the user closed it: it asks, as the tab's menu does, whether to close it
+    /// or detach from it. Without, den attach exited on its own (the den stopped, or the
+    /// connection to it broke), so only the terminal goes: the tab stays, shows why its den
+    /// isn't running, or attaches again when clicked.
+    func closeActiveTab(ask: Bool) -> Bool {
         guard let closing = active else { return false }
+        if ask {
+            if let surface = SpaceStore.shared.surfaces[closing] { closeTab(surface) }
+            return true
+        }
+        let next = tab(after: closing)
         trees[closing] = nil
         active = nil
-
-        // ponytail: the Surface is still in dennet, so its tab stays in the tab bar and a
-        // click attaches again. Deleting the Surface comes with writing back to dennet.
-        show(tabs.first { $0.id != closing })
+        show(next)
         return true
+    }
+
+    /// The tab to show once `closing` goes: the one shown before it that is still there;
+    /// else the one left of it, else the first. It is forgotten as shown.
+    private func tab(after closing: String) -> Surface? {
+        let rest = tabs.filter { $0.id != closing }
+        guard let selected else { return rest.first }
+        recent[selected]?.removeAll { $0 == closing }
+        if let id = recent[selected]?.last(where: { id in rest.contains { $0.id == id } }) {
+            return rest.first { $0.id == id }
+        }
+        let index = tabs.firstIndex { $0.id == closing } ?? 0
+        return index > 0 ? tabs[index - 1] : rest.first
     }
 
     /// Makes a new tab at the end of the selected Space: a Den and a Surface in dennet, then
@@ -236,33 +264,58 @@ final class SpaceTabs: ObservableObject {
 
     /// Asks for a new title and writes it to the Space in dennet.
     func renameSpace(_ space: Space) {
+        askTitle("Rename Space", space.spec.title) { title in
+            guard !title.isEmpty else { return }
+            self.setTitle(title, of: "spaces", space.metadata, failure: "Could not rename the Space")
+        }
+    }
+
+    /// Asks for a new title for a tab and writes it to its Surface in dennet. An empty
+    /// title removes it, and the tab shows its number again.
+    func renameTab(_ surface: Surface) {
+        askTitle("Rename Tab", surface.spec.title, placeholder: "Title (empty shows the tab's number)") { title in
+            self.setTitle(title.isEmpty ? nil : title, of: "surfaces", surface.metadata, failure: "Could not rename the tab")
+        }
+    }
+
+    /// Asks in a sheet for a title, starting from `current`, and passes it on trimmed if it
+    /// changed.
+    private func askTitle(
+        _ message: String, _ current: String?, placeholder: String = "Title", then done: @escaping (String) -> Void
+    ) {
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.stringValue = space.spec.title ?? ""
-        field.placeholderString = "Title"
+        field.stringValue = current ?? ""
+        field.placeholderString = placeholder
         let alert = NSAlert()
-        alert.messageText = "Rename Space"
+        alert.messageText = message
         alert.accessoryView = field
         alert.addButton(withTitle: "Rename")
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
 
-        let rename = { [weak self] (response: NSApplication.ModalResponse) in
+        let rename = { (response: NSApplication.ModalResponse) in
             let title = field.stringValue.trimmingCharacters(in: .whitespaces)
-            guard let self, response == .alertFirstButtonReturn, !title.isEmpty, title != space.spec.title else { return }
-            let path = "/apis/den.mkm.pub/v1alpha1/namespaces/\(space.metadata.namespace ?? "default")/spaces/\(space.metadata.name)"
-            Task { @MainActor in
-                do {
-                    _ = try await SpaceStore.shared.request(
-                        "PATCH", path, json: ["spec": ["title": title]], contentType: "application/merge-patch+json")
-                } catch {
-                    self.alert("Could not rename the Space", error)
-                }
-            }
+            guard response == .alertFirstButtonReturn, title != current ?? "" else { return }
+            done(title)
         }
         if let window = controller?.window {
             alert.beginSheetModal(for: window, completionHandler: rename)
         } else {
             rename(alert.runModal())
+        }
+    }
+
+    /// Sets, or with nil removes, spec.title of a Space or Surface in dennet.
+    private func setTitle(_ title: String?, of resource: String, _ meta: ObjectMeta, failure: String) {
+        let path = "/apis/den.mkm.pub/v1alpha1/namespaces/\(meta.namespace ?? "default")/\(resource)/\(meta.name)"
+        Task { @MainActor in
+            do {
+                _ = try await SpaceStore.shared.request(
+                    "PATCH", path, json: ["spec": ["title": title as Any? ?? NSNull()]],
+                    contentType: "application/merge-patch+json")
+            } catch {
+                self.alert(failure, error)
+            }
         }
     }
 
@@ -383,30 +436,39 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
-    /// Asks, as Ghostty does, then deletes the tab's Surface and Den in dennet, which ends
-    /// its terminal session. If it was in front, the next tab is shown.
+    /// Asks whether to close the tab, deleting its Surface and Den in dennet, which ends its
+    /// den; or to detach, deleting only the Surface, so the den runs on without a tab. If
+    /// it was in front, the next tab is shown.
     func closeTab(_ surface: Surface) {
         let alert = NSAlert()
         alert.messageText = "Close Tab?"
-        alert.informativeText = "The terminal still has a running process. If you close the tab the process will be killed."
-        alert.addButton(withTitle: "Close")
+        alert.informativeText = "Close ends the den and the program running in it. "
+            + "Detach removes the tab but leaves the den running, for den attach to reach later."
+        alert.addButton(withTitle: "Close").hasDestructiveAction = true
+        alert.addButton(withTitle: "Detach")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
 
         let close = { [weak self] (response: NSApplication.ModalResponse) in
-            guard let self, response == .alertFirstButtonReturn else { return }
+            guard let self, response == .alertFirstButtonReturn || response == .alertSecondButtonReturn else { return }
+            let keepDen = response == .alertSecondButtonReturn
             alert.window.orderOut(nil)
             Task { @MainActor in
                 do {
-                    try await self.delete(surface)
+                    try await self.delete(surface, keepDen: keepDen)
                 } catch {
                     self.alert("Could not close the tab", error)
                     return
                 }
-                guard self.active == surface.id else { return }
+                guard self.active == surface.id else {
+                    if let selected = self.selected { self.recent[selected]?.removeAll { $0 == surface.id } }
+                    return
+                }
+                // dennet's watch may not have reported the delete yet; tab(after:) leaves
+                // the tab out either way.
+                let next = self.tab(after: surface.id)
                 self.active = nil
-                // dennet's watch may not have reported the delete yet.
-                self.show(self.tabs.first { $0.id != surface.id })
+                self.show(next)
             }
         }
         if let window = controller?.window {
@@ -475,14 +537,15 @@ final class SpaceTabs: ObservableObject {
             spec: old?["spec"] as? [String: Any] ?? [:])
     }
 
-    /// Deletes a tab's Surface and its Den in dennet, and drops its terminal.
+    /// Deletes a tab's Surface, and its Den in dennet unless `keepDen`, and drops its
+    /// terminal.
     @MainActor
-    private func delete(_ surface: Surface) async throws {
+    private func delete(_ surface: Surface, keepDen: Bool = false) async throws {
         let store = SpaceStore.shared
         let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(surface.metadata.namespace ?? "default")"
         _ = try await store.request("DELETE", "\(root)/surfaces/\(surface.metadata.name)")
         // A Den that has already gone is not an error.
-        if let den = store.den(of: surface) {
+        if !keepDen, let den = store.den(of: surface) {
             _ = try await store.request("DELETE", "\(root)/dens/\(den.metadata.name)")
         }
         trees[surface.id] = nil
