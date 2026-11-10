@@ -268,7 +268,7 @@ private struct RowMiddles: PreferenceKey {
 }
 
 /// One row: state dot in one column, a space, then the title; then an optional subtitle
-/// line and badge line under the title.
+/// line under the title, and badges on the title's line.
 private struct SpaceRow: View {
     let space: Space
     let look: TerminalLook
@@ -287,22 +287,25 @@ private struct SpaceRow: View {
                 .frame(width: 7, height: 7)
                 .frame(width: cell.width, height: cell.height)
             VStack(alignment: .leading, spacing: 0) {
-                TerminalText(text: space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name, look: look)
-                    .frame(height: cell.height)
-                if let subtitle = space.spec.subtitle, !subtitle.isEmpty {
-                    TerminalText(text: subtitle, look: look, opacity: 0.55)
-                        .frame(height: cell.height)
-                }
-                if let badges = space.spec.badges, !badges.isEmpty {
-                    HStack(spacing: 4) {
+                // The title on the left, the badges in a line on the right, truncating the title first.
+                HStack(spacing: 4) {
+                    TerminalText(text: space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name, look: look)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let badges = space.spec.badges, !badges.isEmpty {
                         ForEach(badges.indices, id: \.self) { i in
                             let color = Self.color(badges[i].tone)
                             Text(badges[i].text)
                                 .foregroundStyle(color)
                                 .padding(.horizontal, 4)
                                 .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                                .fixedSize()
                         }
                     }
+                }
+                .frame(height: cell.height)
+                if let subtitle = space.spec.subtitle, !subtitle.isEmpty {
+                    TerminalText(text: subtitle, look: look, opacity: 0.55)
+                        .frame(height: cell.height)
                 }
             }
             .padding(.leading, cell.width)
