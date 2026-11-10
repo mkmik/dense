@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// dense's commands in the command palette: what the Space and tab menus do, the View menu's
 /// tree lines, and a "Go to Space" for every Space. Ghostty's own New Tab and Close Tab
@@ -12,6 +13,12 @@ extension SpaceTabs {
         let space = selected.flatMap { store.spaces[$0] }
         let tab = active.flatMap { store.surfaces[$0] }
         var options: [CommandOption] = [
+            CommandOption(title: "Open Space…", symbols: ["⌘", "O"], leadingIcon: "folder") {
+                // Once this palette has closed and given the focus back to the terminal.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    NSApp.sendAction(#selector(TerminalController.openSpace(_:)), to: nil, from: nil)
+                }
+            },
             CommandOption(title: "New Space", leadingIcon: "plus.rectangle.on.folder") { self.newSpace(parent: nil) },
             CommandOption(title: "Filter Spaces", description: "Filter the sidebar by title, or #tag",
                           leadingIcon: "line.3.horizontal.decrease.circle") {
@@ -43,6 +50,32 @@ extension SpaceTabs {
                           leadingIcon: "folder") { self.select(other) }
         }
         return options
+    }
+
+    /// Every Space, this machine's then each Host's, in the sidebar's order and drawn as there,
+    /// for Open Space (⌘O). The palette searches each one's title, the titles above it, and
+    /// its tags as "#tag". Collapsed Spaces show their subspaces here.
+    func openOptions(look: TerminalLook) -> [CommandOption] {
+        let store = SpaceStore.shared
+        let cell = look.cell
+        let rows = ([nil] + store.hostNames.map(Optional.some)).flatMap { host in
+            Space.rows(store.spaces(on: host).map { space in
+                var space = space
+                space.spec.collapsed = nil
+                return space
+            })
+        }
+        return rows.map { row in
+            CommandOption(
+                title: Self.title(row.space),
+                subtitle: Self.path(row.space, in: store.spaces),
+                description: row.space.spec.tags.map { $0.map { "#" + $0 }.joined(separator: " ") },
+                row: AnyView(SpaceRow(space: row.space, look: look, cell: cell)
+                    .padding(.leading, CGFloat(row.depth * 2) * cell.width)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .font(Font(look.font)))
+            ) { self.select(row.space) }
+        }
     }
 
     private static func title(_ space: Space) -> String {

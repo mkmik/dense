@@ -1084,6 +1084,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     /// dense: the Space shown in this window and its tabs.
     lazy var spaceTabs = SpaceTabs(controller: self)
 
+    /// View > Open Space… (⌘O): the command palette, listing only the Spaces.
+    @IBAction func openSpace(_ sender: Any?) {
+        showCommandPalette(spacesOnly: true)
+    }
+
     override func windowDidLoad() {
         super.windowDidLoad()
         guard let window else { return }

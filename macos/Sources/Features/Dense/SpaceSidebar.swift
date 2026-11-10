@@ -39,11 +39,7 @@ struct SpaceSidebar: View {
         .font(Font(font))
     }
 
-    /// The width of one character, and the height of one line, in the font.
-    private var cell: CGSize {
-        CGSize(width: ("M" as NSString).size(withAttributes: [.font: font]).width,
-               height: NSLayoutManager().defaultLineHeight(for: font))
-    }
+    private var cell: CGSize { look.cell }
 
     /// The bottom of the sidebar, laid out like Rex's: a filter icon that never moves. On
     /// hover a light pill shows behind it with the word "Filter"; a click turns the word
@@ -274,8 +270,8 @@ private struct RowMiddles: PreferenceKey {
 }
 
 /// One row: state dot in one column, a space, then the title; then an optional subtitle
-/// line under the title, and badges on the title's line.
-private struct SpaceRow: View {
+/// line under the title, and badges on the title's line. Open Space (⌘O) shows them too.
+struct SpaceRow: View {
     let space: Space
     let look: TerminalLook
     let cell: CGSize

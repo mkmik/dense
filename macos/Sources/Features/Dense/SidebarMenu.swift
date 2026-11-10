@@ -17,6 +17,8 @@ enum SidebarMenu {
         item.target = Target.shared
         view.addItem(.separator())
         view.addItem(item)
+        // To the window's controller, through the responder chain.
+        view.addItem(NSMenuItem(title: "Open Space…", action: #selector(TerminalController.openSpace(_:)), keyEquivalent: "o"))
     }
 
     /// Menu items hold their target weakly, so it is a long-lived object.

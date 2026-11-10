@@ -117,25 +117,8 @@ struct SpaceWindowView<Terminal: View>: View {
         return surface
     }
 
-    /// How the terminals draw text. Until a terminal has been shown, the font is the
-    /// system's monospaced one at the config's font-size.
-    private var terminalLook: TerminalLook {
-        var size: Float = 13
-        var thicken = false
-        var ink = ghostty_config_color_s()
-        if let config = ghostty.config.config {
-            func get<T>(_ key: String, _ value: inout T) -> Bool {
-                ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8)))
-            }
-            _ = get("font-size", &size)
-            _ = get("font-thicken", &thicken)
-            if !get("foreground", &ink) { ink = .init(r: 0, g: 0, b: 0) }
-        }
-        return TerminalLook(
-            font: tabs.font ?? .monospacedSystemFont(ofSize: CGFloat(size), weight: .regular),
-            ink: NSColor(srgbRed: CGFloat(ink.r) / 255, green: CGFloat(ink.g) / 255, blue: CGFloat(ink.b) / 255, alpha: 1),
-            thicken: thicken)
-    }
+    /// How the terminals draw text.
+    private var terminalLook: TerminalLook { TerminalLook(config: ghostty.config, font: tabs.font) }
 
     /// What a Space shows when it has no terminal to show.
     private var placeholder: String {
