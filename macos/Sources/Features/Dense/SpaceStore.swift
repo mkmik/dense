@@ -111,6 +111,24 @@ struct Den: DennetObject {
         var phase: String?
         /// den's control socket.
         var socket: String?
+        /// Whether the terminal's title is one a coding agent sets. Kept instead of the title,
+        /// which an agent animates while it works, so the Den only changes when this does.
+        var agentTitle = false
+
+        enum CodingKeys: CodingKey { case phase, socket, title }
+
+        init(phase: String? = nil, socket: String? = nil, title: String? = nil) {
+            self.phase = phase
+            self.socket = socket
+            agentTitle = title.map(Den.agentTitle) ?? false
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(phase: try c.decodeIfPresent(String.self, forKey: .phase),
+                      socket: try c.decodeIfPresent(String.self, forKey: .socket),
+                      title: try c.decodeIfPresent(String.self, forKey: .title))
+        }
     }
 
     var metadata: ObjectMeta
@@ -121,14 +139,25 @@ struct Den: DennetObject {
     var running: Bool { status?.phase == "Running" && status?.socket?.isEmpty == false }
 
     /// Whether the den runs a coding agent: a word of its command is one, as in
-    /// ["claude"] or ["/bin/zsh", "-lic", "claude --resume ID; exec /bin/zsh -l"].
-    // ponytail: only these names, and only in the command the den was started with; an
-    // agent started by hand in the den's shell isn't seen. Add names as they come up.
+    /// ["claude"] or ["/bin/zsh", "-lic", "claude --resume ID; exec /bin/zsh -l"], or one
+    /// started in its shell has set the terminal's title (see `agentTitle`).
+    // ponytail: only these names, and only Claude Code's titles; an agent that leaves the
+    // title alone, like codex, is seen only from the command. If guessing falls short, den
+    // could report the terminal's foreground program in its status.
     var agent: Bool {
-        (spec?.command ?? []).contains { arg in
+        status?.agentTitle == true || (spec?.command ?? []).contains { arg in
             arg.split(whereSeparator: { $0.isWhitespace || $0 == ";" || $0 == "&" || $0 == "|" })
                 .contains { ["claude", "codex"].contains($0.split(separator: "/").last.map(String.init) ?? "") }
         }
+    }
+}
+
+extension Den {
+    /// Whether a terminal title is one Claude Code sets: a glyph, a space, then the task,
+    /// as in "✳ logo" when it waits or "◐ more" while it works (the glyph spins).
+    static func agentTitle(_ title: String) -> Bool {
+        guard let glyph = title.unicodeScalars.first, title.unicodeScalars.dropFirst().first == " " else { return false }
+        return "✳✢✶✻✽◐◓◑◒".unicodeScalars.contains(glyph) || (0x2801...0x28FF).contains(glyph.value)
     }
 }
 

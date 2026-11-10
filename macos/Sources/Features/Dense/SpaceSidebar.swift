@@ -296,8 +296,6 @@ private struct SpaceRow: View {
                             let color = Self.color(badges[i].tone)
                             Text(badges[i].text)
                                 .foregroundStyle(color)
-                                .padding(.horizontal, 4)
-                                .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
                                 .fixedSize()
                         }
                     }

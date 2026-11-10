@@ -51,6 +51,19 @@ struct SpaceTreeTests {
         #expect(!den(["vim", "claude.md"]).agent)
     }
 
+    @Test func aDenRunsAnAgentWhenItsTitleIsOneClaudeCodeSets() {
+        func den(_ title: String) -> Den {
+            Den(metadata: .init(name: "d", namespace: "default"), status: .init(phase: "Running", title: title))
+        }
+        #expect(den("✳ logo").agent)
+        #expect(den("◐ more").agent)
+        #expect(den("⠐ fix tests").agent)
+        #expect(!den("main").agent)
+        #expect(!den("worktree-piped-honking-backus").agent)
+        #expect(!den("✳").agent)
+        #expect(!den("").agent)
+    }
+
     @Test func guidesRunDownWhileAnAncestorHasSiblingsToCome() {
         let rows = Space.rows([
             space("a", order: 1),
