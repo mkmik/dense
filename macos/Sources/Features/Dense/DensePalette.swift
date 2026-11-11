@@ -33,6 +33,7 @@ extension SpaceTabs {
                 CommandOption(title: "New Subspace", subtitle: name, leadingIcon: "folder.badge.plus") { self.newSpace(parent: space) },
                 CommandOption(title: "Rename Space", subtitle: name, leadingIcon: "pencil") { self.renameSpace(space) },
                 CommandOption(title: "Edit Space Tags", subtitle: name, leadingIcon: "tag") { self.editTags(space) },
+                CommandOption(title: "Archive Space", subtitle: name, leadingIcon: "archivebox") { self.archiveSpace(space) },
                 CommandOption(title: "Delete Space", subtitle: name, leadingIcon: "trash") { self.deleteSpace(space) },
             ]
         }
@@ -45,7 +46,7 @@ extension SpaceTabs {
         if NewBuild.shared.available {
             options.append(CommandOption(title: "Restart to Use New Build", leadingIcon: "power.circle", emphasis: true) { NewBuild.restart() })
         }
-        options += store.spaces.values.map { other in
+        options += store.spaces.values.filter { $0.spec.archived != true }.map { other in
             CommandOption(title: "Go to Space: \(Self.title(other))", subtitle: Self.path(other, in: store.spaces),
                           leadingIcon: "folder") { self.select(other) }
         }
@@ -54,27 +55,32 @@ extension SpaceTabs {
 
     /// Every Space, this machine's then each Host's, in the sidebar's order and drawn as there,
     /// for Open Space (⌘O). The palette searches each one's title, the titles above it, and
-    /// its tags as "#tag". Collapsed Spaces show their subspaces here.
+    /// its tags as "#tag". Collapsed Spaces show their subspaces here. The archived Spaces
+    /// come last, greyed out and found by "archived" too; opening one brings it back.
     func openOptions(look: TerminalLook) -> [CommandOption] {
         let store = SpaceStore.shared
         let cell = look.cell
-        let rows = ([nil] + store.hostNames.map(Optional.some)).flatMap { host in
-            Space.rows(store.spaces(on: host).map { space in
-                var space = space
-                space.spec.collapsed = nil
-                return space
-            })
-        }
-        return rows.map { row in
-            CommandOption(
-                title: Self.title(row.space),
-                subtitle: Self.path(row.space, in: store.spaces),
-                description: row.space.spec.tags.map { $0.map { "#" + $0 }.joined(separator: " ") },
-                row: AnyView(SpaceRow(space: row.space, look: look, cell: cell)
-                    .padding(.leading, CGFloat(row.depth * 2) * cell.width)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .font(Font(look.font)))
-            ) { self.select(row.space) }
+        return [false, true].flatMap { archived in
+            let rows = ([nil] + store.hostNames.map(Optional.some)).flatMap { host in
+                Space.rows(store.spaces(on: host, archived: archived).map { space in
+                    var space = space
+                    space.spec.collapsed = nil
+                    return space
+                })
+            }
+            return rows.map { row in
+                let tags = row.space.spec.tags.map { $0.map { "#" + $0 }.joined(separator: " ") }
+                return CommandOption(
+                    title: Self.title(row.space),
+                    subtitle: Self.path(row.space, in: store.spaces),
+                    description: archived ? ["archived", tags].compactMap { $0 }.joined(separator: " ") : tags,
+                    row: AnyView(SpaceRow(space: row.space, look: look, cell: cell)
+                        .opacity(archived ? 0.5 : 1)
+                        .padding(.leading, CGFloat(row.depth * 2) * cell.width)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .font(Font(look.font)))
+                ) { archived ? self.unarchiveSpace(row.space) : self.select(row.space) }
+            }
         }
     }
 

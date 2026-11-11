@@ -168,6 +168,7 @@ struct SpaceSidebar: View {
                 Button("Rename…") { tabs.renameSpace(row.space) }
                 Button("Edit Tags…") { tabs.editTags(row.space) }
                 Divider()
+                Button("Archive Space…") { tabs.archiveSpace(row.space) }
                 Button("Delete Space…", role: .destructive) { tabs.deleteSpace(row.space) }
             }
     }
