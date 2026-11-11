@@ -59,6 +59,9 @@ final class SpaceTabs: ObservableObject {
     /// Text to type into a new tab once it is attached, by Surface id.
     private var pendingInput: [String: String] = [:]
 
+    /// Watches for each tab's den attach exiting, by Surface id.
+    private var exits: [String: AnyCancellable] = [:]
+
     private var restore: AnyCancellable?
     private var denChanges: AnyCancellable?
 
@@ -732,7 +735,21 @@ final class SpaceTabs: ObservableObject {
             size: tabSize(controller))
         config.initialInput = pendingInput.removeValue(forKey: surface.id)
         guard let app = controller.ghostty.app else { preconditionFailure("app must be loaded") }
-        return Ghostty.SurfaceView(app, baseConfig: config)
+        let view = Ghostty.SurfaceView(app, baseConfig: config)
+        // Ghostty keeps a terminal given a command open after it exits, saying it exited,
+        // until a key is pressed. den attach exiting means the den stopped or let go, so the
+        // terminal closes at once and the tab shows why. A quick or failed exit (level
+        // error) stays, so its error can be read. Ghostty reports an exit only while the
+        // terminal is in a window; one exited out of sight is dropped when shown.
+        exits[surface.id] = view.$childExitedMessage
+            .compactMap { $0 }
+            .filter { $0.level == .success }
+            .first()
+            .sink { [weak self, weak view] _ in
+                guard let view else { return }
+                self?.controller?.closeSurface(view, withConfirmation: false)
+            }
+        return view
     }
 
     static func denURL(_ namespace: String, _ den: String) -> String {
