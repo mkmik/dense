@@ -49,6 +49,13 @@ final class SpaceTabs: ObservableObject {
     /// after another goes back through them in turn.
     private var recent: [String: [String]] = [:]
 
+    /// The tabs shown in this window, by Surface id, oldest first, and which one is where
+    /// Go Back and Go Forward (⌘[ and ⌘]) are, as in a browser. Every switch to another tab
+    /// counts, in this Space or another.
+    // ponytail: never trimmed; a few bytes per switch.
+    private var history: [String] = []
+    private var historyIndex = -1
+
     /// Text to type into a new tab once it is attached, by Surface id.
     private var pendingInput: [String: String] = [:]
 
@@ -129,15 +136,35 @@ final class SpaceTabs: ObservableObject {
     private func go(to request: ShowRequest) -> Bool {
         let store = SpaceStore.shared
         if let id = request.surface {
-            guard let surface = store.surfaces[id],
-                  let space = store.spaces[objectID(surface.metadata.namespace, surface.spec.space)] else { return false }
-            selected = space.id
-            show(surface)
+            return show(surfaceID: id)
         } else if let id = request.space {
             guard let space = store.spaces[id] else { return false }
             select(space)
         }
         return true
+    }
+
+    /// Shows a tab by its Surface id, in whichever Space it is. False if dennet has no such tab.
+    private func show(surfaceID id: String) -> Bool {
+        let store = SpaceStore.shared
+        guard let surface = store.surfaces[id],
+              let space = store.spaces[objectID(surface.metadata.namespace, surface.spec.space)] else { return false }
+        selected = space.id
+        show(surface)
+        return true
+    }
+
+    /// Go Back, or Go Forward: shows the tab before (or after) the current one in the history,
+    /// skipping tabs deleted since. False when there is none.
+    func goHistory(forward: Bool) -> Bool {
+        var index = historyIndex
+        while true {
+            index += forward ? 1 : -1
+            guard history.indices.contains(index) else { return false }
+            guard history[index] != active, SpaceStore.shared.surfaces[history[index]] != nil else { continue }
+            historyIndex = index
+            return show(surfaceID: history[index])
+        }
     }
 
     /// The selected Space's terminal tabs, in order.
@@ -160,6 +187,12 @@ final class SpaceTabs: ObservableObject {
         if let active { trees[active] = controller.surfaceTree }
 
         active = surface?.id
+        // A new place in the history, unless this is the place Go Back or Go Forward moved to.
+        if let id = surface?.id, historyIndex < 0 || history[historyIndex] != id {
+            history.removeSubrange((historyIndex + 1)...)
+            history.append(id)
+            historyIndex = history.count - 1
+        }
         if let selected, let surface {
             lastTab[selected] = surface.id
             recent[selected, default: []].removeAll { $0 == surface.id }

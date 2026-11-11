@@ -447,6 +447,18 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Move the current tab to a new window."),
         }},
 
+        .go_back => comptime &.{.{
+            .action = .go_back,
+            .title = i18n.N_("Go Back"),
+            .description = i18n.N_("Go back to the tab shown before."),
+        }},
+
+        .go_forward => comptime &.{.{
+            .action = .go_forward,
+            .title = i18n.N_("Go Forward"),
+            .description = i18n.N_("Go forward to the tab left with Go Back."),
+        }},
+
         .toggle_tab_overview => comptime &.{.{
             .action = .toggle_tab_overview,
             .title = i18n.N_("Toggle Tab Overview"),

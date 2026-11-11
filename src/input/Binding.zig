@@ -590,6 +590,14 @@ pub const Action = union(enum) {
     /// Move a tab to a new window.
     move_tab_to_new_window,
 
+    /// dense: go back to the tab shown before, as a browser's Back button does.
+    /// Every switch to another tab counts, whether it is in the same Space or
+    /// another one.
+    go_back,
+
+    /// dense: undo a `go_back`, as a browser's Forward button does.
+    go_forward,
+
     /// Toggle the tab overview.
     ///
     /// This is only supported on Linux and when the system's libadwaita
@@ -1450,6 +1458,8 @@ pub const Action = union(enum) {
             .goto_tab,
             .move_tab,
             .move_tab_to_new_window,
+            .go_back,
+            .go_forward,
             .toggle_tab_overview,
             .new_split,
             .goto_split,

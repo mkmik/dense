@@ -626,6 +626,13 @@ extension Ghostty {
             case GHOSTTY_ACTION_GOTO_TAB:
                 return gotoTab(app, target: target, tab: action.action.goto_tab)
 
+            case GHOSTTY_ACTION_GO_BACK, GHOSTTY_ACTION_GO_FORWARD:
+                // dense: the window's history of tabs shown, as in a browser.
+                guard target.tag == GHOSTTY_TARGET_SURFACE, let surface = target.target.surface,
+                      let tabs = (surfaceView(from: surface)?.window?.windowController as? TerminalController)?.spaceTabs
+                else { return false }
+                return tabs.goHistory(forward: action.tag == GHOSTTY_ACTION_GO_FORWARD)
+
             case GHOSTTY_ACTION_GOTO_SPLIT:
                 return gotoSplit(app, target: target, direction: action.action.goto_split)
 

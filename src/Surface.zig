@@ -5591,6 +5591,18 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             {},
         ),
 
+        .go_back => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .go_back,
+            {},
+        ),
+
+        .go_forward => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .go_forward,
+            {},
+        ),
+
         .toggle_tab_overview => return try self.rt_app.performAction(
             .{ .surface = self },
             .toggle_tab_overview,
