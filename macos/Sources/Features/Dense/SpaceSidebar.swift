@@ -47,7 +47,9 @@ struct SpaceSidebar: View {
     /// focus. Esc, or leaving the field empty, closes it.
     private var filterBar: some View {
         HStack(spacing: 7) {
-            Image(systemName: "line.3.horizontal.decrease.circle")
+            Image(systemName: filter.isEmpty
+                  ? "line.3.horizontal.decrease.circle"
+                  : "line.3.horizontal.decrease.circle.fill")
                 .font(.system(size: 16))
                 .foregroundStyle(filterFocused ? .primary : .secondary)
             if filtering {
@@ -55,11 +57,21 @@ struct SpaceSidebar: View {
                     .textFieldStyle(.plain)
                     .focused($filterFocused)
                     .onExitCommand { closeFilter() }
+                if !filter.isEmpty {
+                    Button(action: closeFilter) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear filter")
+                }
             } else if filterHover {
                 Text("Filter").foregroundStyle(.secondary)
             }
         }
         .padding(.leading, 7.5)
+        .padding(.trailing, 8)
         .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .leading)
         .background(Capsule().fill(Color.primary.opacity(filterFocused ? 0.075 : filterHover || filtering ? 0.037 : 0)))
         .contentShape(Capsule())
