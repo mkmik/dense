@@ -232,31 +232,29 @@ private struct TreeLines: View {
     }
 }
 
-/// Turns off the rubber-band bounce of the scroll view it sits in, for this scroll view
-/// only. SwiftUI's scrollBounceBehavior(.basedOnSize) still bounces once the content is
-/// taller than the view, and SwiftUI sets the scroll view's elasticity back on every
-/// update, so this watches it and puts it back to none each time.
+/// Stops the scroll view it sits in from scrolling past its top or bottom edge (the
+/// rubber-band bounce), for this scroll view only. Turning the scroll view's elasticity
+/// off is not enough: SwiftUI's scroll view still overshoots with a real trackpad. So
+/// each time the scroll position changes, this moves it back inside the content.
 private struct NoBounce: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { View() }
     func updateNSView(_ nsView: NSView, context: Context) {}
 
     final class View: NSView {
-        private var watches: [NSKeyValueObservation] = []
-
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            watches = []
-            guard let scrollView = enclosingScrollView else { return }
-            scrollView.verticalScrollElasticity = .none
-            scrollView.horizontalScrollElasticity = .none
-            watches = [
-                scrollView.observe(\.verticalScrollElasticity) { view, _ in
-                    if view.verticalScrollElasticity != .none { view.verticalScrollElasticity = .none }
-                },
-                scrollView.observe(\.horizontalScrollElasticity) { view, _ in
-                    if view.horizontalScrollElasticity != .none { view.horizontalScrollElasticity = .none }
-                },
-            ]
+            NotificationCenter.default.removeObserver(self)
+            guard let clip = enclosingScrollView?.contentView else { return }
+            clip.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(clamp), name: NSView.boundsDidChangeNotification, object: clip)
+        }
+
+        @objc private func clamp(_ note: Notification) {
+            guard let clip = note.object as? NSClipView else { return }
+            // The furthest the clip view may scroll, without the overshoot.
+            let origin = clip.constrainBoundsRect(clip.bounds).origin
+            if origin != clip.bounds.origin { clip.setBoundsOrigin(origin) }
         }
     }
 }
