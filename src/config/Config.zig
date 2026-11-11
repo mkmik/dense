@@ -7254,15 +7254,16 @@ pub const Keybinds = struct {
                 .{ .key = .{ .unicode = 'd' }, .mods = .{ .super = true, .shift = true } },
                 .{ .new_split = .down },
             );
+            // dense: no splits, so ⌘[ and ⌘] go back and forward, as in a browser.
             try self.set.put(
                 alloc,
                 .{ .key = .{ .unicode = '[' }, .mods = .{ .super = true } },
-                .{ .goto_split = .previous },
+                .{ .go_back = {} },
             );
             try self.set.put(
                 alloc,
                 .{ .key = .{ .unicode = ']' }, .mods = .{ .super = true } },
-                .{ .goto_split = .next },
+                .{ .go_forward = {} },
             );
             try self.set.put(
                 alloc,
