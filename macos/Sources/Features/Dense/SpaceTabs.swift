@@ -93,7 +93,7 @@ final class SpaceTabs: ObservableObject {
             guard let self, store.loaded else { return }
             // Nothing was saved, or another Space has been picked since.
             guard let saved, self.selected == saved else { return self.restore = nil }
-            if let space = store.spaces[saved], store.loaded(space) {
+            if let space = store.spaces[saved], space.spec.archived != true, store.loaded(space) {
                 self.restore = nil
                 self.select(space)
             } else if self.active == nil, self.controller?.surfaceTree.isEmpty == false {
@@ -453,10 +453,22 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
+    /// The user default behind the archive sheet's checkbox: archive the subspaces too
+    /// (true, the default) or delete them.
+    static let archiveSubspacesKey = "dense.archiveSubspaces"
+
     /// Asks, in a sheet like Ghostty's close confirmations, then deletes a Space from
     /// dennet with its subspaces, their tabs (Surfaces) and the Dens those attach to, which
     /// ends their terminal sessions. dennet does not delete dependent objects itself.
-    func deleteSpace(_ space: Space) {
+    func deleteSpace(_ space: Space) { remove(space, archive: false) }
+
+    /// Like `deleteSpace`, but the Space itself stays in dennet, archived: hidden from the
+    /// sidebar and listed in Open Space (⌘O), which brings it back (`unarchiveSpace`). Its
+    /// tabs go all the same. A checkbox in the sheet, remembered for next time, says whether
+    /// its subspaces are archived too or deleted.
+    func archiveSpace(_ space: Space) { remove(space, archive: true) }
+
+    private func remove(_ space: Space, archive: Bool) {
         let store = SpaceStore.shared
         let namespace = space.metadata.namespace ?? "default"
 
@@ -475,41 +487,72 @@ final class SpaceTabs: ObservableObject {
         }
         let surfaces = doomed.flatMap { $0.terminals(Array(store.surfaces.values)) }
         let ids = seen
+        let subspaces = doomed.count - 1
 
         let alert = NSAlert()
-        alert.messageText = "Delete \"\(space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name)\"?"
-        var gone: [String] = []
-        if doomed.count > 1 { gone.append(doomed.count == 2 ? "1 subspace" : "\(doomed.count - 1) subspaces") }
-        if !surfaces.isEmpty { gone.append(surfaces.count == 1 ? "1 tab" : "\(surfaces.count) tabs") }
-        alert.informativeText = gone.isEmpty
-            ? "This cannot be undone."
-            : "Its \(gone.joined(separator: " and ")) will be deleted too, and their terminal sessions will be terminated."
-        alert.addButton(withTitle: "Delete")
+        let title = space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name
+        if archive {
+            alert.messageText = "Archive \"\(title)\"?"
+            alert.informativeText = (surfaces.isEmpty ? "" : "Its tabs will be closed, and their terminal sessions terminated. ")
+                + "Open Space (⌘O) brings it back, with a new tab."
+            // NSAlert's own checkbox, under the text. Shown, greyed out, even with no
+            // subspaces, so the choice is always in view.
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.isEnabled = subspaces > 0
+            alert.suppressionButton?.title = switch subspaces {
+            case 0: "Archive subspaces too (unchecked deletes them)"
+            case 1: "Archive its subspace too (unchecked deletes it)"
+            default: "Archive its \(subspaces) subspaces too (unchecked deletes them)"
+            }
+            let keep = UserDefaults.standard.object(forKey: Self.archiveSubspacesKey) as? Bool ?? true
+            alert.suppressionButton?.state = keep ? .on : .off
+            alert.addButton(withTitle: "Archive")
+        } else {
+            alert.messageText = "Delete \"\(title)\"?"
+            var gone: [String] = []
+            if subspaces > 0 { gone.append(subspaces == 1 ? "1 subspace" : "\(subspaces) subspaces") }
+            if !surfaces.isEmpty { gone.append(surfaces.count == 1 ? "1 tab" : "\(surfaces.count) tabs") }
+            alert.informativeText = gone.isEmpty
+                ? "This cannot be undone."
+                : "Its \(gone.joined(separator: " and ")) will be deleted too, and their terminal sessions will be terminated."
+            alert.addButton(withTitle: "Delete")
+        }
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
 
-        let delete = { [weak self] (response: NSApplication.ModalResponse) in
+        let confirm = { [weak self] (response: NSApplication.ModalResponse) in
             guard let self, response == .alertFirstButtonReturn else { return }
             // As in Ghostty: keeps focus right when Stage Manager is used (#8336).
             alert.window.orderOut(nil)
+            let keepSubspaces = alert.suppressionButton?.state == .on
+            if archive { UserDefaults.standard.set(keepSubspaces, forKey: Self.archiveSubspacesKey) }
 
             Task { @MainActor in
                 let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)"
                 do {
+                    // dennet would close an archived Space's tabs too, but this also drops
+                    // their terminals here.
                     for surface in surfaces { try await self.delete(surface) }
                     // Children first, so no subspace shows at the top level for a moment.
-                    for space in doomed.reversed() {
-                        _ = try await store.request("DELETE", "\(root)/spaces/\(space.metadata.name)")
+                    // dennet archives the subspaces of an archived Space too, but later.
+                    for gone in doomed.reversed() {
+                        let path = "\(root)/spaces/\(gone.metadata.name)"
+                        if archive && (gone.id == space.id || keepSubspaces) {
+                            _ = try await store.request(
+                                "PATCH", path, json: ["spec": ["archived": true]], contentType: "application/merge-patch+json")
+                        } else {
+                            _ = try await store.request("DELETE", path)
+                        }
                     }
                 } catch {
-                    self.alert("Could not delete the Space", error)
+                    self.alert(archive ? "Could not archive the Space" : "Could not delete the Space", error)
                     return
                 }
                 // Move off the Space, dropping its tab in front. dennet's watch may not
-                // have reported the deletes yet.
+                // have reported the changes yet.
                 guard let selected = self.selected, ids.contains(selected) else { return }
                 self.active = nil
-                if let next = Space.rows(store.spaces.values.filter { !ids.contains($0.id) }).first {
+                if let next = Space.rows(store.spaces.values.filter { !ids.contains($0.id) && $0.spec.archived != true }).first {
                     self.select(next.space)
                 } else {
                     self.selected = nil
@@ -518,9 +561,37 @@ final class SpaceTabs: ObservableObject {
             }
         }
         if let window = controller?.window {
-            alert.beginSheetModal(for: window, completionHandler: delete)
+            alert.beginSheetModal(for: window, completionHandler: confirm)
         } else {
-            delete(alert.runModal())
+            confirm(alert.runModal())
+        }
+    }
+
+    /// Brings back an archived Space, from Open Space (⌘O): dennet reopens it, and it is
+    /// shown with one new tab. The Spaces under it stay archived. Archived Spaces above it
+    /// come back too, without tabs, top first: dennet archives again any Space whose
+    /// parent is archived.
+    func unarchiveSpace(_ space: Space) {
+        let store = SpaceStore.shared
+        var chain = [space]
+        while let name = chain[0].spec.parent, let up = store.spaces[objectID(space.metadata.namespace, name)],
+              up.spec.archived == true, !chain.contains(where: { $0.id == up.id }) {
+            chain.insert(up, at: 0)
+        }
+        let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(space.metadata.namespace ?? "default")"
+        Task { @MainActor in
+            do {
+                for up in chain {
+                    _ = try await store.request(
+                        "PATCH", "\(root)/spaces/\(up.metadata.name)", json: ["spec": ["archived": NSNull()]],
+                        contentType: "application/merge-patch+json")
+                }
+            } catch {
+                self.alert("Could not bring back the Space", error)
+                return
+            }
+            self.select(space)
+            self.newTab(nil)
         }
     }
 

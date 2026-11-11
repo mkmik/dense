@@ -35,6 +35,9 @@ struct Space: DennetObject {
         var tags: [String]?
         /// Where dens for this Space's tabs start; unset means the nearest Space above's.
         var workingDir: String?
+        /// Archived Spaces are hidden from the sidebar and listed in Open Space (⌘O). dennet
+        /// deletes an archived Space's tabs and Dens, and archives the Spaces under it.
+        var archived: Bool?
     }
 
     struct Badge: Decodable, Equatable {
@@ -321,10 +324,11 @@ final class SpaceStore: ObservableObject {
     /// The names of the Hosts, sorted.
     var hostNames: [String] { hosts.values.map(\.metadata.name).sorted() }
 
-    /// The Spaces on a Host, or on this machine for nil.
-    func spaces(on host: String?) -> [Space] {
+    /// The Spaces on a Host, or on this machine for nil: the archived ones, or the others.
+    func spaces(on host: String?, archived: Bool = false) -> [Space] {
         let names = Set(hosts.values.map(\.metadata.name))
         return spaces.values.filter { space in
+            guard (space.spec.archived == true) == archived else { return false }
             guard let host else { return !names.contains(space.metadata.namespace ?? "default") }
             return space.metadata.namespace == host
         }
