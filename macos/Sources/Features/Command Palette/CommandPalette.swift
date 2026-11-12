@@ -145,8 +145,6 @@ struct CommandPaletteView: View {
                 }
             }
 
-            Divider()
-
             CommandTable(
                 options: filteredOptions,
                 query: query,
@@ -155,6 +153,8 @@ struct CommandPaletteView: View {
                     isPresented = false
                     option.action()
                 }
+
+            CommandPaletteFooter(description: (selectedOption ?? filteredOptions.first { $0.id == hoveredOptionID })?.description)
         }
         .frame(maxWidth: 500)
         .background(
@@ -167,9 +167,9 @@ struct CommandPaletteView: View {
             }
                 .compositingGroup()
         )
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(Color(nsColor: .tertiaryLabelColor).opacity(0.75))
         )
         .shadow(radius: 32, x: 0, y: 12)
@@ -226,32 +226,88 @@ private struct CommandPaletteQuery: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
 
-            TextField(placeholder, text: $query)
-                .padding()
-                .font(.system(size: 20, weight: .light))
-                .frame(height: 48)
-                .textFieldStyle(.plain)
-                .focused($isTextFieldFocused)
-                .onChange(of: isTextFieldFocused) { focused in
-                    if !focused {
-                        onEvent?(.exit)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.secondary)
+                field
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
                     }
+                    .buttonStyle(.plain)
+                    // Keep the focus in the field: losing it closes the palette.
+                    .focusable(false)
                 }
-                .onExitCommand { onEvent?(.exit) }
-                .onMoveCommand { onEvent?(.move($0)) }
-                .onSubmit { onEvent?(.submit) }
-                .onAppear {
-                    // Grab focus on the first appearance.
-                    // Debug and Release build using Xcode 26.4,
-                    // has same issue again
-                    // Fixes: https://github.com/ghostty-org/ghostty/issues/8497
-                    // SearchOverlay works magically as expected, I don't know
-                    // why it's different here, but dispatching to next loop fixes it
-                    DispatchQueue.main.async {
-                        isTextFieldFocused = true
-                    }
-                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 40)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.06)))
+            .padding([.horizontal, .top], 10)
+            .padding(.bottom, 2)
         }
+    }
+
+    private var field: some View {
+        TextField(placeholder, text: $query)
+            .font(.system(size: 17))
+            .textFieldStyle(.plain)
+            .focused($isTextFieldFocused)
+            .onChange(of: isTextFieldFocused) { focused in
+                if !focused {
+                    onEvent?(.exit)
+                }
+            }
+            .onExitCommand { onEvent?(.exit) }
+            .onMoveCommand { onEvent?(.move($0)) }
+            .onSubmit { onEvent?(.submit) }
+            .onAppear {
+                // Grab focus on the first appearance.
+                // Debug and Release build using Xcode 26.4,
+                // has same issue again
+                // Fixes: https://github.com/ghostty-org/ghostty/issues/8497
+                // SearchOverlay works magically as expected, I don't know
+                // why it's different here, but dispatching to next loop fixes it
+                DispatchQueue.main.async {
+                    isTextFieldFocused = true
+                }
+            }
+    }
+}
+
+/// The bottom of the palette: the explanation of the selected command, then the key to run it.
+private struct CommandPaletteFooter: View {
+    let description: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+            // Two lines kept free, so the palette doesn't change height as the selection moves.
+            // An empty Text has no height, so two blank lines hold the space instead.
+            ZStack(alignment: .topLeading) {
+                Text(" \n ").hidden()
+                Text(description ?? "")
+                    .lineLimit(2)
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                Spacer()
+                Text("Run")
+                    .foregroundStyle(.secondary)
+                Text("↩")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .overlay(RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color(nsColor: .tertiaryLabelColor)))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
     }
 }
 
@@ -270,7 +326,7 @@ private struct CommandTable: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(options.enumerated()), id: \.1.id) { index, option in
                             CommandRow(
                                 option: option,
@@ -290,9 +346,10 @@ private struct CommandTable: View {
                             }
                         }
                     }
-                    .padding(10)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                 }
-                .frame(maxHeight: 200)
+                .frame(maxHeight: 320)
                 .onChange(of: selectedIndex) { _ in
                     guard let selectedIndex,
                           selectedIndex < options.count else { return }
@@ -312,6 +369,11 @@ private struct CommandRow: View {
     @Binding var hoveredID: UUID?
     var action: () -> Void
 
+    /// Selected standard rows are filled with the accent color and drawn in white, as in
+    /// Rex. Custom rows draw their own colors, so they keep a light tint instead.
+    private var filled: Bool { isSelected && option.row == nil }
+    private var match: Color { filled ? .white : .accentColor }
+
     private var highlightedTitle: Text {
         guard !query.isEmpty,
               let indices = option.title.matchedIndices(for: query) else {
@@ -328,7 +390,7 @@ private struct CommandRow: View {
             let attrStart = attributed.index(attributed.startIndex, offsetByCharacters: offset)
             let attrEnd = attributed.index(attrStart, offsetByCharacters: 1)
             attributed[attrStart..<attrEnd].font = .body.bold()
-            attributed[attrStart..<attrEnd].foregroundColor = Color.accentColor
+            attributed[attrStart..<attrEnd].foregroundColor = match
         }
 
         return Text(attributed)
@@ -347,8 +409,8 @@ private struct CommandRow: View {
             let offset = subtitle.distance(from: subtitle.startIndex, to: idx)
             let attrStart = attributed.index(attributed.startIndex, offsetByCharacters: offset)
             let attrEnd = attributed.index(attrStart, offsetByCharacters: 1)
-            attributed[attrStart..<attrEnd].font = .caption.bold()
-            attributed[attrStart..<attrEnd].foregroundColor = Color.accentColor
+            attributed[attrStart..<attrEnd].font = .body.bold()
+            attributed[attrStart..<attrEnd].foregroundColor = match
         }
 
         return Text(attributed)
@@ -364,21 +426,23 @@ private struct CommandRow: View {
 
             if let icon = option.leadingIcon {
                 Image(systemName: icon)
-                    .foregroundStyle(option.emphasis ? Color.accentColor : .secondary)
+                    .foregroundStyle(filled ? .white : option.emphasis ? Color.accentColor : .secondary)
                     .font(.system(size: 14, weight: .medium))
             }
 
-            VStack(alignment: .leading, spacing: 2) {
-                highlightedTitle
-
-                if let subtitle = option.subtitle ?? option.description {
-                    highlightedSubtitle(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            highlightedTitle
+                .lineLimit(1)
 
             Spacer()
+
+            // The explanation is at the bottom of the palette; the subtitle sits on the
+            // right, like a setting's value in Rex.
+            if let subtitle = option.subtitle {
+                highlightedSubtitle(subtitle)
+                    .foregroundStyle(filled ? Color.white.opacity(0.8) : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
 
             if let badge = option.badge, !badge.isEmpty {
                 Text(badge)
@@ -386,14 +450,14 @@ private struct CommandRow: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(
-                        Capsule().fill(Color.accentColor.opacity(0.15))
+                        Capsule().fill(match.opacity(0.15))
                     )
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(match)
             }
 
             if let symbols = option.symbols {
                 ShortcutSymbolsView(symbols: symbols)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(filled ? Color.white.opacity(0.8) : .secondary)
             }
         }
     }
@@ -404,23 +468,23 @@ private struct CommandRow: View {
                 if let row = option.row { row } else { standardRow }
             }
             // A custom row is one line of text, as in the sidebar.
-            .padding(.horizontal, 8)
-            .padding(.vertical, option.row == nil ? 8 : 1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, option.row == nil ? 6 : 2)
+            .foregroundStyle(filled ? Color.white : Color.primary)
             .contentShape(Rectangle())
             .background(
                 isSelected
-                    ? Color.accentColor.opacity(0.2)
+                    ? Color.accentColor.opacity(filled ? 1 : 0.25)
                     : (hoveredID == option.id
-                       ? Color.secondary.opacity(0.2)
+                       ? Color.secondary.opacity(0.15)
                        : Color.clear)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(Color.accentColor.opacity(option.emphasis && !isSelected ? 0.3 : 0), lineWidth: 1.5)
             )
-            .cornerRadius(5)
+            .cornerRadius(8)
         }
-        .help(option.description ?? "")
         .buttonStyle(.plain)
         .onHover { hovering in
             hoveredID = hovering ? option.id : nil
