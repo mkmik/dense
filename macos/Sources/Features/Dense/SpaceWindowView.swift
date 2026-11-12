@@ -189,8 +189,12 @@ private struct SurfaceTabBar: View {
                     Button { tabs.show(surface) } label: {
                         HStack(spacing: 5) {
                             // A sparkle for a tab running a coding agent.
-                            Image(systemName: SpaceStore.shared.den(of: surface)?.agent == true ? "sparkle" : "terminal")
-                                .imageScale(.small)
+                            if SpaceStore.shared.den(of: surface)?.agent == true {
+                                Image(systemName: "sparkle").imageScale(.small)
+                            } else {
+                                // A bare prompt, no box around it.
+                                Text(">_").font(.system(size: 10, weight: .heavy, design: .monospaced))
+                            }
                             Text(Self.title(surface, index: index)).lineLimit(1)
                         }
                         .padding(.horizontal, 8)
