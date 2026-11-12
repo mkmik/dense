@@ -7131,12 +7131,7 @@ pub const Keybinds = struct {
                 .{ .key = .{ .unicode = 'q' }, .mods = .{ .super = true } },
                 .{ .quit = {} },
             );
-            try self.set.putFlags(
-                alloc,
-                .{ .key = .{ .unicode = 'k' }, .mods = .{ .super = true } },
-                .{ .clear_screen = {} },
-                .{ .performable = true },
-            );
+            // dense: no ⌘K for clear_screen; ⌘K is Open Space (a menu item, see SidebarMenu.swift).
             try self.set.put(
                 alloc,
                 .{ .key = .{ .unicode = 'a' }, .mods = .{ .super = true } },

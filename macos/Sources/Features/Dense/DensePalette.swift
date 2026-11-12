@@ -54,7 +54,7 @@ extension SpaceTabs {
     }
 
     /// Every Space, this machine's then each Host's, in the sidebar's order and drawn as there,
-    /// for Open Space (⌘O). The palette searches each one's title, the titles above it, and
+    /// for Open Space (⌘K). The palette searches each one's title, the titles above it, and
     /// its tags as "#tag". Collapsed Spaces show their subspaces here. The archived Spaces
     /// come last, greyed out and found by "archived" too; opening one brings it back.
     func openOptions(look: TerminalLook) -> [CommandOption] {

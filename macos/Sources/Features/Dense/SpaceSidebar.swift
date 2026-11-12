@@ -281,7 +281,7 @@ private struct RowMiddles: PreferenceKey {
 }
 
 /// One row: state dot in one column, a space, then the title; then an optional subtitle
-/// line under the title, and badges on the title's line. Open Space (⌘O) shows them too.
+/// line under the title, and badges on the title's line. Open Space (⌘K) shows them too.
 struct SpaceRow: View {
     let space: Space
     let look: TerminalLook

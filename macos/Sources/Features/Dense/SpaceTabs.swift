@@ -463,7 +463,7 @@ final class SpaceTabs: ObservableObject {
     func deleteSpace(_ space: Space) { remove(space, archive: false) }
 
     /// Like `deleteSpace`, but the Space itself stays in dennet, archived: hidden from the
-    /// sidebar and listed in Open Space (⌘O), which brings it back (`unarchiveSpace`). Its
+    /// sidebar and listed in Open Space (⌘K), which brings it back (`unarchiveSpace`). Its
     /// tabs go all the same. A checkbox in the sheet, remembered for next time, says whether
     /// its subspaces are archived too or deleted.
     func archiveSpace(_ space: Space) { remove(space, archive: true) }
@@ -494,7 +494,7 @@ final class SpaceTabs: ObservableObject {
         if archive {
             alert.messageText = "Archive \"\(title)\"?"
             alert.informativeText = (surfaces.isEmpty ? "" : "Its tabs will be closed, and their terminal sessions terminated. ")
-                + "Open Space (⌘O) brings it back, with a new tab."
+                + "Open Space (⌘K) brings it back, with a new tab."
             // NSAlert's own checkbox, under the text. Shown, greyed out, even with no
             // subspaces, so the choice is always in view.
             alert.showsSuppressionButton = true
@@ -567,7 +567,7 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
-    /// Brings back an archived Space, from Open Space (⌘O): dennet reopens it, and it is
+    /// Brings back an archived Space, from Open Space (⌘K): dennet reopens it, and it is
     /// shown with one new tab. The Spaces under it stay archived. Archived Spaces above it
     /// come back too, without tabs, top first: dennet archives again any Space whose
     /// parent is archived.
