@@ -1,0 +1,28 @@
+# dense's map. `todography lint` checks it; `todography open` draws it.
+# Format: https://mkmik.github.io/todography/reference/format.html
+title = "dense"
+
+[[band]]
+id = "ui"
+title = "What you see"
+
+[[band]]
+id = "show"
+title = "What a tab shows"
+
+[[band]]
+id = "deps"
+title = "What it stands on"
+
+[[milestone]]
+id = "m1"
+title = "Terminal sidebar"
+summary = "Glue a terminal tab beside another as one combo tab, and unglue it again"
+
+[[kind]]
+id = "code"
+summary = "Code in this repository"
+
+[[kind]]
+id = "external"
+summary = "Another project in the den stack"
