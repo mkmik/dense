@@ -17,9 +17,13 @@ struct SpaceWindowView<Terminal: View>: View {
     @AppStorage("dense.sidebarWidth") private var sidebarWidth: Double = 220
     /// The width when the current drag of the sidebar's edge began.
     @State private var dragStartWidth: Double?
+    /// Whether the sidebar is folded away, in this window only.
+    @State private var sidebarHidden = false
 
     /// The height of the titlebar row the window buttons sit in.
     static var titlebarHeight: CGFloat { 28 }
+    /// Where the sidebar button starts, right of the window buttons.
+    private static var sidebarButtonX: CGFloat { 76 }
 
     init(ghostty: Ghostty.App, tabs: SpaceTabs, @ViewBuilder terminal: () -> Terminal) {
         self.ghostty = ghostty
@@ -29,28 +33,30 @@ struct SpaceWindowView<Terminal: View>: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            VStack(spacing: 6) {
-                // The titlebar row, right of the window buttons.
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    NotWindowDraggable(content: Button { tabs.newSpace(parent: nil) } label: {
-                        Image(systemName: "plus").frame(width: 22, height: 22).contentShape(Rectangle())
+            if !sidebarHidden {
+                VStack(spacing: 6) {
+                    // The titlebar row, right of the window buttons.
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        NotWindowDraggable(content: Button { tabs.newSpace(parent: nil) } label: {
+                            Image(systemName: "plus").frame(width: 22, height: 22).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("New Space"))
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("New Space"))
+                    .padding(.horizontal, 8)
+                    .frame(height: Self.titlebarHeight)
+                    SpaceSidebar(tabs: tabs, selection: ghostty.config.backgroundColor, look: terminalLook)
                 }
-                .padding(.horizontal, 8)
-                .frame(height: Self.titlebarHeight)
-                SpaceSidebar(tabs: tabs, selection: ghostty.config.backgroundColor, look: terminalLook)
+                .frame(width: sidebarWidth)
+                .frame(maxHeight: .infinity, alignment: .top)
+                // A grey wash over the terminal background, so the tint follows the theme.
+                .background(Color(white: 0.5).opacity(0.15))
+                .overlay(alignment: .trailing) { resizeHandle }
+                // Above the terminal, which the handle reaches 3 points into.
+                .zIndex(1)
             }
-            .frame(width: sidebarWidth)
-            .frame(maxHeight: .infinity, alignment: .top)
-            // A grey wash over the terminal background, so the tint follows the theme.
-            .background(Color(white: 0.5).opacity(0.15))
-            .overlay(alignment: .trailing) { resizeHandle }
-            // Above the terminal, which the handle reaches 3 points into.
-            .zIndex(1)
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     // In the titlebar row a drag moves the window, unless the view under
@@ -61,6 +67,8 @@ struct SpaceWindowView<Terminal: View>: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 8)
+                // Clear of the window buttons and the sidebar button.
+                .padding(.leading, sidebarHidden ? Self.sidebarButtonX + 22 : 0)
                 .frame(height: Self.titlebarHeight)
                 if tabs.selected != nil && (tabs.active == nil || tabs.waiting) {
                     VStack(spacing: 12) {
@@ -84,6 +92,17 @@ struct SpaceWindowView<Terminal: View>: View {
         // opacity twice; draw this only outside the terminal if that bothers anyone.
         .background(ghostty.config.backgroundColor.opacity(ghostty.config.backgroundOpacity))
         .overlay(alignment: .bottomTrailing) { NewBuildPill() }
+        // Over both, so it stays put whether the sidebar is shown or not.
+        .overlay(alignment: .topLeading) {
+            NotWindowDraggable(content: Button { sidebarHidden.toggle() } label: {
+                Image(systemName: "sidebar.left").frame(width: 22, height: 22).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help(sidebarHidden ? "Show Sidebar" : "Hide Sidebar"))
+            .frame(height: Self.titlebarHeight)
+            .padding(.leading, Self.sidebarButtonX)
+        }
         .ignoresSafeArea(.container, edges: .top)
     }
 
