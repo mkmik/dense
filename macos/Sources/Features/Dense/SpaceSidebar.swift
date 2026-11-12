@@ -286,6 +286,8 @@ struct SpaceRow: View {
     let space: Space
     let look: TerminalLook
     let cell: CGSize
+    /// Shown in place of the Space's title; Open Space puts the whole path here.
+    var title: String? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -302,7 +304,7 @@ struct SpaceRow: View {
             VStack(alignment: .leading, spacing: 0) {
                 // The title on the left, the badges in a line on the right, truncating the title first.
                 HStack(spacing: 4) {
-                    TerminalText(text: space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name, look: look)
+                    TerminalText(text: title ?? space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name, look: look)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if let badges = space.spec.badges, !badges.isEmpty {
                         ForEach(badges.indices, id: \.self) { i in
