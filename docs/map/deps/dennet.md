@@ -14,9 +14,9 @@ status = "done"
 [[feature]]
 id = "glue"
 title = "A Surface field naming the Surface it is glued beside"
-status = "todo"
+status = "done"
 milestone = "m1"
-note = "t8y:/api/surface#glue in dennet's map"
+note = "spec.beside; t8y:/api/surface#glue in dennet's map"
 +++
 
 Only what dense needs from dennet. dennet has its own map.

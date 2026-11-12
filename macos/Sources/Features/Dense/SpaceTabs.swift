@@ -6,11 +6,12 @@ import GhosttyKit
 /// The Space shown in one window, and which of its tabs (Surfaces) is in front.
 ///
 /// The window's terminal area shows one tab at a time by swapping the controller's
-/// surface tree. Each terminal Surface gets its own Ghostty surface running `den attach`,
-/// made the first time the tab is shown while its Den's status says it runs. Until then
-/// the tab waits, and attaches as soon as the status changes. Tabs out of view keep
-/// running, so switching is instant and nothing attaches twice. The terminal the window
-/// opened with is closed as soon as a tab is shown.
+/// surface tree; or two side by side, when the tab in front is in a combo with a tab glued
+/// beside it (`Space.combos`, t8y:/tabs/combo). Each terminal Surface gets its own Ghostty
+/// surface running `den attach`, made the first time the tab is shown while its Den's
+/// status says it runs. Until then the tab waits, and attaches as soon as the status
+/// changes. Tabs out of view keep running, so switching is instant and nothing attaches
+/// twice. The terminal the window opened with is closed as soon as a tab is shown.
 ///
 /// dense has no macOS window tabs. Ghostty's tab commands (new tab, go to tab, move tab,
 /// close tab), from key bindings, menus, AppleScript, Shortcuts or Services, act on these
@@ -39,8 +40,17 @@ final class SpaceTabs: ObservableObject {
 
     private weak var controller: TerminalController?
 
-    /// Each tab's terminal tree, by Surface id. A tree can hold splits made inside the tab.
+    /// Each tab's terminal tree, by Surface id. dense makes no splits inside a tab, so each
+    /// is one terminal.
     private var trees: [String: SplitTree<Ghostty.SurfaceView>] = [:]
+
+    /// The tabs in the window: the tab in front and, if it is in a combo, the other one, left
+    /// first. The other one's terminal may be missing, while its den doesn't run.
+    private var shownCombo: [String] = []
+
+    // ponytail: this window only, until t8y:/tabs/combo#resize keeps it in dennet.
+    /// How much of the window each combo's left tab takes, by its Surface id, as last dragged.
+    private var ratios: [String: Double] = [:]
 
     /// The tab last in front in each Space, by Space id.
     private var lastTab: [String: String]
@@ -64,6 +74,7 @@ final class SpaceTabs: ObservableObject {
 
     private var restore: AnyCancellable?
     private var denChanges: AnyCancellable?
+    private var surfaceChanges: AnyCancellable?
 
     /// When a key was last pressed in this window.
     private var lastKey = Date.distantPast
@@ -101,10 +112,18 @@ final class SpaceTabs: ObservableObject {
             }
         }
 
-        // A waiting tab attaches as soon as its den runs.
-        denChanges = SpaceStore.shared.$dens.receive(on: DispatchQueue.main).sink { [weak self] _ in
-            guard let self, self.waiting, let surface = self.tabs.first(where: { $0.id == self.active }),
-                  SpaceStore.shared.den(of: surface)?.running == true else { return }
+        // A waiting tab, or the tab glued to the one in front, attaches as soon as its den runs.
+        denChanges = store.$dens.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            guard let self, let surface = self.active.flatMap({ store.surfaces[$0] }),
+                  self.combo(of: surface).contains(where: { self.trees[$0.id] == nil && store.den(of: $0)?.running == true })
+            else { return }
+            self.show(surface)
+        }
+
+        // A combo glued or unglued, from this window or elsewhere, changes what is shown.
+        surfaceChanges = store.$surfaces.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            guard let self, let surface = self.active.flatMap({ store.surfaces[$0] }),
+                  self.combo(of: surface).map(\.id) != self.shownCombo else { return }
             self.show(surface)
         }
 
@@ -164,7 +183,7 @@ final class SpaceTabs: ObservableObject {
         while true {
             index += forward ? 1 : -1
             guard history.indices.contains(index) else { return false }
-            guard history[index] != active, SpaceStore.shared.surfaces[history[index]] != nil else { continue }
+            guard !sameStop(history[index], active), SpaceStore.shared.surfaces[history[index]] != nil else { continue }
             historyIndex = index
             return show(surfaceID: history[index])
         }
@@ -176,49 +195,60 @@ final class SpaceTabs: ObservableObject {
         return space.terminals(Array(SpaceStore.shared.surfaces.values))
     }
 
+    /// The selected Space's tabs as stops: a tab alone, or a combo (see `Space.combos`).
+    var stops: [[Surface]] { Space.combos(tabs) }
+
+    /// The stop a tab is in, in its own Space: the tab alone, or its combo.
+    func combo(of surface: Surface) -> [Surface] {
+        let store = SpaceStore.shared
+        guard let space = store.spaces[objectID(surface.metadata.namespace, surface.spec.space)] else { return [surface] }
+        return Space.combos(space.terminals(Array(store.surfaces.values))).first { $0.contains { $0.id == surface.id } }
+            ?? [surface]
+    }
+
+    /// Whether two tabs are the same stop: the same tab, or the two tabs of a combo.
+    private func sameStop(_ a: String, _ b: String?) -> Bool {
+        a == b || SpaceStore.shared.surfaces[a].map(combo(of:))?.contains { $0.id == b } == true
+    }
+
     func select(_ space: Space) {
         selected = space.id
         show(tabs.first { $0.id == lastTab[space.id] } ?? tabs.first)
     }
 
-    /// Brings a tab of the selected Space to the front; nil shows no tab.
+    /// Brings a tab of the selected Space to the front; nil shows no tab. A tab in a combo
+    /// comes with the other tab, side by side.
     func show(_ surface: Surface?) {
         guard let controller else { return }
 
-        // Set aside the tab in front. If no tab is, the window shows its own terminal or
-        // nothing, and that is dropped.
-        if let active { trees[active] = controller.surfaceTree }
+        // Keep how wide the panes of the combo in front were.
+        if case let .split(split) = controller.surfaceTree.root, let left = shownCombo.first { ratios[left] = split.ratio }
 
-        active = surface?.id
-        // A new place in the history, unless this is the place Go Back or Go Forward moved to.
-        if let id = surface?.id, historyIndex < 0 || history[historyIndex] != id {
-            history.removeSubrange((historyIndex + 1)...)
-            history.append(id)
-            historyIndex = history.count - 1
-        }
-        if let selected, let surface {
-            lastTab[selected] = surface.id
-            recent[selected, default: []].removeAll { $0 == surface.id }
-            recent[selected, default: []].append(surface.id)
-        }
-        UserDefaults.standard.set(selected, forKey: Self.selectedKey)
-        UserDefaults.standard.set(lastTab, forKey: Self.lastTabKey)
+        noteShown(surface)
 
-        // A tab whose den attach has exited is attached again, if its den runs.
-        var tree: SplitTree<Ghostty.SurfaceView>?
-        if let surface {
-            tree = trees[surface.id].flatMap { $0.allSatisfy(\.processExited) ? nil : $0 }
-            if tree == nil, SpaceStore.shared.den(of: surface)?.running == true {
-                tree = SplitTree(view: makeView(surface, controller: controller))
+        // Each tab's terminal. One whose den attach has exited is attached again, if its den
+        // runs. The window's own terminal, shown before any tab, is dropped.
+        let members = surface.map(combo(of:)) ?? []
+        shownCombo = members.map(\.id)
+        for tab in members {
+            trees[tab.id] = trees[tab.id].flatMap { $0.allSatisfy(\.processExited) ? nil : $0 }
+            if trees[tab.id] == nil, SpaceStore.shared.den(of: tab)?.running == true {
+                trees[tab.id] = SplitTree(view: makeView(tab, controller: controller))
             }
         }
-        waiting = surface != nil && tree == nil
-        guard let tree else {
+        guard let surface, let tree = trees[surface.id] else {
+            waiting = surface != nil
             controller.surfaceTree = .init()
             return
         }
+        waiting = false
+        let roots = members.compactMap { trees[$0.id]?.root }
+        let shown = roots.count < 2 ? tree : SplitTree(
+            root: .split(.init(direction: .horizontal, ratio: ratios[members[0].id] ?? 0.5, left: roots[0], right: roots[1])),
+            zoomed: nil)
         let old = controller.focusedSurface
-        controller.surfaceTree = tree
+        // Moving between the two tabs of a combo only moves the focus.
+        if !shown.elementsEqual(controller.surfaceTree, by: ===) { controller.surfaceTree = shown }
         if let view = tree.root?.leftmostLeaf() {
             DispatchQueue.main.async { Ghostty.moveFocus(to: view, from: old) }
             if let surface = view.surface, let raw = ghostty_surface_quicklook_font(surface) {
@@ -229,25 +259,73 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
-    /// Called when the tab in front is to close: the user closed it (⌘W, File > Close Tab),
-    /// or its den attach exited. If there is a tab in front this returns true, and
-    /// otherwise false, so the window closes as usual.
-    ///
-    /// With `ask`, the user closed it: it asks, as the tab's menu does, whether to close it
-    /// or detach from it. Without, den attach exited on its own (the den stopped, or the
-    /// connection to it broke), so only the terminal goes: the tab stays, shows why its den
-    /// isn't running, or attaches again when clicked.
+    /// Puts a tab in front in the history and in its Space's last and recent tabs.
+    private func noteShown(_ surface: Surface?) {
+        active = surface?.id
+        // A new place in the history, unless this is the place Go Back or Go Forward moved to.
+        // A combo is one place: moving between its tabs changes which one it brings back.
+        if let id = surface?.id, historyIndex < 0 || history[historyIndex] != id {
+            if historyIndex >= 0, sameStop(history[historyIndex], id) {
+                history[historyIndex] = id
+            } else {
+                history.removeSubrange((historyIndex + 1)...)
+                history.append(id)
+                historyIndex = history.count - 1
+            }
+        }
+        if let selected, let surface {
+            lastTab[selected] = surface.id
+            recent[selected, default: []].removeAll { $0 == surface.id }
+            recent[selected, default: []].append(surface.id)
+        }
+        UserDefaults.standard.set(selected, forKey: Self.selectedKey)
+        UserDefaults.standard.set(lastTab, forKey: Self.lastTabKey)
+    }
+
+    /// The focus moved to a terminal in the window. In a combo, its tab comes to the front.
+    func focused(_ view: Ghostty.SurfaceView?) {
+        guard let view, let id = shownCombo.first(where: { trees[$0]?.contains(view) == true }), id != active,
+              let surface = SpaceStore.shared.surfaces[id] else { return }
+        noteShown(surface)
+    }
+
+    /// Called when the tab in front is to close: the user closed it (File > Close Tab). If
+    /// there is a tab in front this returns true, and otherwise false, so the window closes
+    /// as usual. See `close(_:ask:)`.
     func closeActiveTab(ask: Bool) -> Bool {
         guard let closing = active else { return false }
+        close(tab: closing, ask: ask)
+        return true
+    }
+
+    /// Called when a terminal in the window is to close: the user closed it (⌘W), or its
+    /// den attach exited. `node` is a tab's terminal, or all the window shows, which closes
+    /// the tab in front. Returns false when it is no tab's, so it closes as usual.
+    func close(_ node: SplitTree<Ghostty.SurfaceView>.Node, ask: Bool) -> Bool {
+        guard let id = shownCombo.first(where: { trees[$0]?.root == node })
+                ?? (node == controller?.surfaceTree.root ? active : nil) else { return false }
+        close(tab: id, ask: ask)
+        return true
+    }
+
+    /// With `ask`, the user closed the tab: it asks, as the tab's menu does, whether to close
+    /// it or detach from it. Without, den attach exited on its own (the den stopped, or the
+    /// connection to it broke), so only the terminal goes: the tab stays, shows why its den
+    /// isn't running, or attaches again when clicked.
+    private func close(tab closing: String, ask: Bool) {
         if ask {
             if let surface = SpaceStore.shared.surfaces[closing] { closeTab(surface) }
-            return true
+            return
+        }
+        trees[closing] = nil
+        guard closing == active else {
+            // The other tab of the combo in front: the tab in front fills the window.
+            controller?.surfaceTree = active.flatMap { trees[$0] } ?? .init()
+            return
         }
         let next = tab(after: closing)
-        trees[closing] = nil
         active = nil
         show(next)
-        return true
     }
 
     /// The tab to show once `closing` goes: the one shown before it that is still there;
@@ -256,6 +334,10 @@ final class SpaceTabs: ObservableObject {
         let rest = tabs.filter { $0.id != closing }
         guard let selected else { return rest.first }
         recent[selected]?.removeAll { $0 == closing }
+        // The other tab of its combo, which shared its place.
+        if shownCombo.contains(closing), let other = rest.first(where: { $0.id != closing && shownCombo.contains($0.id) }) {
+            return other
+        }
         if let id = recent[selected]?.last(where: { id in rest.contains { $0.id == id } }) {
             return rest.first { $0.id == id }
         }
@@ -395,15 +477,21 @@ final class SpaceTabs: ObservableObject {
 
     /// Sets, or with nil removes, spec.title of a Space or Surface in dennet.
     private func setTitle(_ title: String?, of resource: String, _ meta: ObjectMeta, failure: String) {
+        Task { @MainActor in await self.patchSpec(resource, meta, ["title": title as Any? ?? NSNull()], failure: failure) }
+    }
+
+    /// Merges fields into the spec of a Space or Surface in dennet; NSNull removes one. If
+    /// dennet refuses, it says why, under `failure`, and returns false.
+    @MainActor @discardableResult
+    private func patchSpec(_ resource: String, _ meta: ObjectMeta, _ spec: [String: Any], failure: String) async -> Bool {
         let path = "/apis/den.mkm.pub/v1alpha1/namespaces/\(meta.namespace ?? "default")/\(resource)/\(meta.name)"
-        Task { @MainActor in
-            do {
-                _ = try await SpaceStore.shared.request(
-                    "PATCH", path, json: ["spec": ["title": title as Any? ?? NSNull()]],
-                    contentType: "application/merge-patch+json")
-            } catch {
-                self.alert(failure, error)
-            }
+        do {
+            _ = try await SpaceStore.shared.request(
+                "PATCH", path, json: ["spec": spec], contentType: "application/merge-patch+json")
+            return true
+        } catch {
+            alert(failure, error)
+            return false
         }
     }
 
@@ -703,6 +791,8 @@ final class SpaceTabs: ObservableObject {
         let store = SpaceStore.shared
         let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(surface.metadata.namespace ?? "default")"
         _ = try await store.request("DELETE", "\(root)/surfaces/\(surface.metadata.name)")
+        // At once, so it isn't shown again in a combo, attached, before the watch says it's gone.
+        store.forget(surface: surface.id)
         // A Den that has already gone is not an error.
         if !keepDen, let den = store.den(of: surface) {
             _ = try await store.request("DELETE", "\(root)/dens/\(den.metadata.name)")
@@ -710,42 +800,88 @@ final class SpaceTabs: ObservableObject {
         trees[surface.id] = nil
     }
 
-    /// Ghostty's goto_tab: a tab number from 1, or previous, next or last. Returns false
-    /// when there is no tab to go to.
+    /// Ghostty's goto_tab: a stop number from 1, or previous, next or last. A combo is one
+    /// stop, and brings back the tab of it last in front. Returns false when there is no tab
+    /// to go to.
     func gotoTab(_ tab: ghostty_action_goto_tab_e) -> Bool {
-        let tabs = self.tabs
-        guard !tabs.isEmpty else { return false }
-        let current = tabs.firstIndex { $0.id == active }
+        let stops = self.stops
+        guard !stops.isEmpty else { return false }
+        let current = stops.firstIndex { $0.contains { $0.id == active } }
         let index: Int
         switch tab {
-        case GHOSTTY_GOTO_TAB_PREVIOUS: index = ((current ?? 0) + tabs.count - 1) % tabs.count
-        case GHOSTTY_GOTO_TAB_NEXT: index = ((current ?? -1) + 1) % tabs.count
-        case GHOSTTY_GOTO_TAB_LAST: index = tabs.count - 1
+        case GHOSTTY_GOTO_TAB_PREVIOUS: index = ((current ?? 0) + stops.count - 1) % stops.count
+        case GHOSTTY_GOTO_TAB_NEXT: index = ((current ?? -1) + 1) % stops.count
+        case GHOSTTY_GOTO_TAB_LAST: index = stops.count - 1
         default:
             guard tab.rawValue >= 1 else { return false }
-            index = min(Int(tab.rawValue) - 1, tabs.count - 1)
+            index = min(Int(tab.rawValue) - 1, stops.count - 1)
         }
-        show(tabs[index])
+        let last = selected.flatMap { recent[$0] }?.last { id in stops[index].contains { $0.id == id } }
+        show(stops[index].first { $0.id == last } ?? stops[index][0])
         return true
     }
 
-    /// Ghostty's move_tab: moves the tab in front left (negative) or right.
+    /// Ghostty's move_tab: moves the tab in front, with its combo, left (negative) or right.
     func moveTab(by amount: Int) -> Bool {
-        guard let active, let from = tabs.firstIndex(where: { $0.id == active }) else { return false }
+        guard let active, let from = stops.firstIndex(where: { $0.contains { $0.id == active } }) else { return false }
         move(active, to: from + amount)
         return true
     }
 
-    /// Moves a tab to a place in the tab bar, by writing the new `order` of the Space's
-    /// Surfaces to dennet.
+    /// Moves a tab, with its combo, to a place among the stops in the tab bar, by writing the
+    /// new `order` of the Space's Surfaces to dennet. A glued tab comes right after the tab
+    /// it is glued to, so that it stays there when unglued.
     func move(_ id: String, to index: Int) {
-        var tabs = self.tabs
-        guard let from = tabs.firstIndex(where: { $0.id == id }) else { return }
-        let to = min(max(index, 0), tabs.count - 1)
+        var stops = self.stops
+        guard let from = stops.firstIndex(where: { $0.contains { $0.id == id } }) else { return }
+        let to = min(max(index, 0), stops.count - 1)
         guard to != from else { return }
-        tabs.insert(tabs.remove(at: from), at: to)
+        stops.insert(stops.remove(at: from), at: to)
+        writeOrder("surfaces", stops.joined().map { ($0.metadata, $0.spec.order) }, failure: "Could not move the tab")
+    }
 
-        writeOrder("surfaces", tabs.map { ($0.metadata, $0.spec.order) }, failure: "Could not move the tab")
+    /// Glues a tab beside another tab of its Space, on its right, by writing the first's
+    /// `beside` to dennet: the two show side by side, as one combo tab. Then shows it. A tab
+    /// already in a combo can't be glued, or glued onto: unglue it first.
+    func glue(_ id: String, beside target: String) {
+        let store = SpaceStore.shared
+        guard id != target, let surface = store.surfaces[id], let main = store.surfaces[target],
+              surface.metadata.namespace == main.metadata.namespace, surface.spec.space == main.spec.space,
+              combo(of: surface).count == 1, combo(of: main).count == 1 else { return NSSound.beep() }
+        Task { @MainActor in
+            // A `beside` left on the tab glued onto, naming a tab that glues nothing, would
+            // keep this from counting.
+            if main.spec.beside != nil,
+               await !self.patchSpec("surfaces", main.metadata, ["beside": NSNull()], failure: "Could not glue the tab") { return }
+            guard await self.patchSpec("surfaces", surface.metadata, ["beside": main.metadata.name],
+                                       failure: "Could not glue the tab") else { return }
+            if self.tabs.contains(where: { $0.id == id }) { self.show(surface) }
+        }
+    }
+
+    /// The tab that Glue to Tab on the Left glues a tab beside: the one left of it, when
+    /// neither is in a combo.
+    func glueTarget(left id: String) -> Surface? {
+        let stops = self.stops
+        guard let at = stops.firstIndex(where: { $0.count == 1 && $0[0].id == id }), at > 0,
+              stops[at - 1].count == 1 else { return nil }
+        return stops[at - 1][0]
+    }
+
+    /// Unglues a combo, either of whose tabs is `id`: each becomes a tab of its own. `id`
+    /// goes to stop `index` among the others, or else stays next to the other tab, on its
+    /// own side.
+    func unglue(_ id: String, to index: Int? = nil) {
+        var stops = self.stops
+        guard let at = stops.firstIndex(where: { $0.count == 2 && $0.contains { $0.id == id } }) else { return NSSound.beep() }
+        let combo = stops[at]
+        stops[at] = combo.filter { $0.id != id }
+        stops.insert(combo.filter { $0.id == id }, at: index.map { min(max($0, 0), stops.count) } ?? (combo[0].id == id ? at : at + 1))
+        Task { @MainActor in
+            guard await self.patchSpec("surfaces", combo[1].metadata, ["beside": NSNull()],
+                                       failure: "Could not unglue the tab") else { return }
+            self.writeOrder("surfaces", stops.joined().map { ($0.metadata, $0.spec.order) }, failure: "Could not move the tab")
+        }
     }
 
     /// Moves a Space to a place among its siblings (in sidebar order), by writing the new

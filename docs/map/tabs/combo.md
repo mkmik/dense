@@ -10,28 +10,28 @@ refs = ["macos/Sources/Features/Dense/SpaceTabs.swift", "macos/Sources/Features/
 [[feature]]
 id = "side-by-side"
 title = "With either tab of a combo in front, both show, the glued one on the right"
-status = "todo"
+status = "done"
 milestone = "m1"
 needs = ["/deps/dennet#glue"]
 
 [[feature]]
 id = "focus"
 title = "Clicking into a pane, or moving the focus there, puts its tab in front"
-status = "todo"
+status = "done"
 milestone = "m1"
 needs = ["#side-by-side"]
 
 [[feature]]
 id = "fused-handle"
 title = "One fused handle: its left half picks the main tab, its right half the glued one"
-status = "todo"
+status = "done"
 milestone = "m1"
 needs = ["#side-by-side", "/tabs/tab-bar#show"]
 
 [[feature]]
 id = "glue"
 title = "Glue: ⌘-drag a handle onto another tab; it goes on that tab's right"
-status = "todo"
+status = "done"
 milestone = "m1"
 note = "A plain drag still reorders. Neither tab may be in a combo already"
 needs = ["#fused-handle", "/tabs/tab-bar#reorder"]
@@ -39,7 +39,7 @@ needs = ["#fused-handle", "/tabs/tab-bar#reorder"]
 [[feature]]
 id = "unglue"
 title = "Unglue: ⌘-drag a half away from its combo; each becomes a full-width tab"
-status = "todo"
+status = "done"
 milestone = "m1"
 note = "Takes the place of Ghostty's split zoom"
 needs = ["#fused-handle"]
@@ -47,24 +47,24 @@ needs = ["#fused-handle"]
 [[feature]]
 id = "stops"
 title = "Go to Tab (⌘1…), next and previous tab, and Go Back (⌘[) stop once per combo"
-status = "todo"
+status = "done"
 milestone = "m1"
 note = "Going to a combo brings back the half that was last in front"
 needs = ["#side-by-side"]
 
 [[feature]]
 id = "commands"
-title = "Glue to the tab on the left, and unglue, from the palette, menus and key bindings"
-status = "todo"
+title = "Glue to the tab on the left, and unglue, from the palette and a tab's menu"
+status = "done"
 milestone = "m1"
-note = "So it works without a mouse. Maybe toggle_split_zoom unglues"
+note = "So it works without a mouse. No key binding yet; maybe toggle_split_zoom unglues"
 needs = ["#side-by-side"]
 
 [[feature]]
 id = "resize"
 title = "Drag the line between the panes; the width is kept with the bond"
 status = "todo"
-note = "Ghostty's split divider already drags; keeping the width needs a field in dennet too"
+note = "The line drags, and the window keeps the width until it closes; keeping it longer needs a field in dennet"
 needs = ["#side-by-side"]
 
 [[feature]]
@@ -102,13 +102,13 @@ that was unglued.
 Only two tabs per combo for now; more is `t8y:/tabs/combo-many`. Only
 side by side; top and bottom is not wanted.
 
-## How it could be built
+## How it is built
 
-`SpaceTabs` keeps one `SplitTree` per tab and puts the front tab's tree in
-the window. For a combo it can put both tabs' trees in one horizontal
-split instead, and set the tab in front from the focused pane. The bond
-is not a split inside one tab's tree: a split there would hide one tab
-from the tab bar.
+`Space.combos` works out the combos from `spec.beside`. `SpaceTabs` keeps
+one terminal per tab and, for a combo, puts both in one horizontal
+`SplitTree` in the window; the focused pane's tab is the one in front.
+The bond is not a split inside one tab's tree: a split there would hide
+one tab from the tab bar.
 
 A bond naming a Surface that has gone counts as no bond, so closing one
 tab of a combo leaves the other as a plain tab, with nothing to clean up
