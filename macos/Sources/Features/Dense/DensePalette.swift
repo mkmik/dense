@@ -56,7 +56,8 @@ extension SpaceTabs {
     /// Every Space, this machine's then each Host's, in the sidebar's order and drawn as there,
     /// for Open Space (⌘K). The palette searches each one's title, the titles above it, and
     /// its tags as "#tag". Collapsed Spaces show their subspaces here. The archived Spaces
-    /// come last, greyed out and found by "archived" too; opening one brings it back.
+    /// come last, greyed out and found by "archived" too; opening one brings it back. Each
+    /// row shows its whole path, "space / subspace / subsubspace", rather than indenting.
     func openOptions(look: TerminalLook) -> [CommandOption] {
         let store = SpaceStore.shared
         let cell = look.cell
@@ -69,14 +70,15 @@ extension SpaceTabs {
                 })
             }
             return rows.map { row in
+                let path = Self.path(row.space, in: store.spaces)
                 let tags = row.space.spec.tags.map { $0.map { "#" + $0 }.joined(separator: " ") }
                 return CommandOption(
                     title: Self.title(row.space),
-                    subtitle: Self.path(row.space, in: store.spaces),
+                    subtitle: path,
                     description: archived ? ["archived", tags].compactMap { $0 }.joined(separator: " ") : tags,
-                    row: AnyView(SpaceRow(space: row.space, look: look, cell: cell)
+                    row: AnyView(SpaceRow(space: row.space, look: look, cell: cell,
+                                          title: [path, Self.title(row.space)].compactMap { $0 }.joined(separator: " / "))
                         .opacity(archived ? 0.5 : 1)
-                        .padding(.leading, CGFloat(row.depth * 2) * cell.width)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .font(Font(look.font)))
                 ) { archived ? self.unarchiveSpace(row.space) : self.select(row.space) }
@@ -88,7 +90,7 @@ extension SpaceTabs {
         space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name
     }
 
-    /// The titles of the Spaces above, as "a › b", or nil at the top.
+    /// The titles of the Spaces above, as "a / b", or nil at the top.
     private static func path(_ space: Space, in spaces: [String: Space]) -> String? {
         var titles: [String] = []
         var seen: Set<String> = [space.id]
@@ -97,6 +99,6 @@ extension SpaceTabs {
             titles.insert(title(up), at: 0)
             parent = up.spec.parent
         }
-        return titles.isEmpty ? nil : titles.joined(separator: " › ")
+        return titles.isEmpty ? nil : titles.joined(separator: " / ")
     }
 }
