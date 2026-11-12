@@ -56,7 +56,7 @@ class BaseTerminalController: NSWindowController,
     /// This can be set to show/hide the command palette.
     @Published var commandPaletteIsShowing: Bool = false
 
-    /// dense: the command palette lists only the Spaces, to open one (⌘O).
+    /// dense: the command palette lists only the Spaces, to open one (⌘K).
     @Published var commandPaletteSpacesOnly = false
 
     /// Set if the terminal view should show the update overlay.

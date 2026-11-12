@@ -24,7 +24,7 @@ struct TerminalCommandPaletteView: View {
     /// result in the view disappearing.
     @Binding var isPresented: Bool
 
-    /// dense: list only the Spaces, to open one (⌘O).
+    /// dense: list only the Spaces, to open one (⌘K).
     var spacesOnly = false
 
     /// The configuration so we can lookup keyboard shortcuts.

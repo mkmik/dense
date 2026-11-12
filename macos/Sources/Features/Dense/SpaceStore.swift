@@ -35,7 +35,7 @@ struct Space: DennetObject {
         var tags: [String]?
         /// Where dens for this Space's tabs start; unset means the nearest Space above's.
         var workingDir: String?
-        /// Archived Spaces are hidden from the sidebar and listed in Open Space (⌘O). dennet
+        /// Archived Spaces are hidden from the sidebar and listed in Open Space (⌘K). dennet
         /// deletes an archived Space's tabs and Dens, and archives the Spaces under it.
         var archived: Bool?
     }
