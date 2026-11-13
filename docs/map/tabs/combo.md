@@ -27,6 +27,7 @@ title = "One fused handle: its left half picks the main tab, its right half the 
 status = "done"
 milestone = "m1"
 needs = ["#side-by-side", "/tabs/tab-bar#show"]
+note = "Each half shows its tab's icon and whole title; a half without a title shows only its icon, no number"
 
 [[feature]]
 id = "glue"

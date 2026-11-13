@@ -197,7 +197,7 @@ private struct SurfaceTabBar: View {
                     HStack(spacing: 0) {
                         ForEach(Array(stop.enumerated()), id: \.element.id) { half, surface in
                             if half > 0 { Rectangle().fill(Color.primary.opacity(0.2)).frame(width: 1, height: 14) }
-                            handle(surface, number: half == 0 ? index + 1 : nil, stop: stop, stops: stops)
+                            handle(surface, number: stop.count == 1 ? index + 1 : nil, stop: stop, stops: stops)
                         }
                     }
                     .background(stop.contains { $0.id == tabs.active } && stop.count > 1 ? Color.primary.opacity(0.04) : .clear,
@@ -221,11 +221,14 @@ private struct SurfaceTabBar: View {
                 .help("New Tab")
             }
         }
+        // At its full width always: the width the hosting view reports can be a point short,
+        // which cut a title or number down to "…".
+        .fixedSize()
         .coordinateSpace(name: "tabs")
         .onPreferenceChange(TabFrames.self) { if drag == nil { frames = $0 } }
     }
 
-    /// One tab's handle, or half of a combo's. `number` is its stop's, for the first tab of one.
+    /// One tab's handle, or half of a combo's. `number` is its stop's, for a tab not in a combo.
     private func handle(_ surface: Surface, number: Int?, stop: [Surface], stops: [[Surface]]) -> some View {
         let front = surface.id == tabs.active
         return Button { tabs.show(surface) } label: {
@@ -308,9 +311,9 @@ private struct SurfaceTabBar: View {
     /// The middle of a stop's handle.
     private func mid(_ stop: [Surface]) -> CGFloat { span(stop).isNull ? 0 : span(stop).midX }
 
-    /// The Surface's title if it has been given one, else for the first tab of a stop its
-    /// number in the row from 1, the number that Go to Tab (⌘1, ⌘2, …) uses. A glued tab
-    /// without a title shows only its icon.
+    /// The Surface's title if it has been given one, else for a tab not in a combo its
+    /// number in the row from 1, the number that Go to Tab (⌘1, ⌘2, …) uses. A tab of a
+    /// combo without a title shows only its icon.
     private static func title(_ surface: Surface, number: Int?) -> String? {
         surface.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? number.map(String.init)
     }
