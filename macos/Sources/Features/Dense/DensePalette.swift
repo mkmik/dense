@@ -39,6 +39,14 @@ extension SpaceTabs {
         }
         if let tab {
             options.append(CommandOption(title: "Rename Tab", subtitle: tab.spec.title, leadingIcon: "pencil") { self.renameTab(tab) })
+            if combo(of: tab).count > 1 {
+                options.append(CommandOption(title: "Unglue Tab", description: "Show the two tabs of this combo as tabs of their own",
+                                             leadingIcon: "rectangle") { self.unglue(tab.id) })
+            } else if let left = glueTarget(left: tab.id) {
+                options.append(CommandOption(title: "Glue to Tab on the Left", subtitle: left.spec.title,
+                                             description: "Show this tab beside the tab on its left, as one combo tab",
+                                             leadingIcon: "rectangle.split.2x1") { self.glue(tab.id, beside: left.id) })
+            }
             if store.den(of: tab)?.running == false {
                 options.append(CommandOption(title: "Restart Den", leadingIcon: "arrow.clockwise") { self.restartDen(tab) })
             }

@@ -681,15 +681,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         _ node: SplitTree<Ghostty.SurfaceView>.Node,
         withConfirmation: Bool = true
     ) {
+        // dense: closing a Space's tab, or either tab of a combo, closes or detaches the tab,
+        // not the window. Ghostty asks for confirmation while den attach runs, so the user
+        // closed it; else it exited.
+        if spaceTabs.close(node, ask: withConfirmation) { return }
+
         // If this isn't the root then we're dealing with a split closure.
         if surfaceTree.root != node {
             super.closeSurface(node, withConfirmation: withConfirmation)
             return
         }
-
-        // dense: closing a Space's tab closes or detaches the tab, not the window. Ghostty
-        // asks for confirmation while den attach runs, so the user closed it; else it exited.
-        if spaceTabs.closeActiveTab(ask: withConfirmation) { return }
 
         // More than 1 window means we have tabs and we're closing a tab
         if window?.tabGroup?.windows.count ?? 0 > 1 {
@@ -1520,6 +1521,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     override func focusedSurfaceDidChange(to: Ghostty.SurfaceView?) {
         super.focusedSurfaceDidChange(to: to)
+        // dense: in a combo, the tab whose terminal has the focus is the one in front.
+        spaceTabs.focused(to)
 
         // We always cancel our event listener
         surfaceAppearanceCancellables.removeAll()

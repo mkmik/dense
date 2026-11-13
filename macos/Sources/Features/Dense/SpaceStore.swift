@@ -56,6 +56,9 @@ struct Surface: DennetObject {
         var space: String
         var order: Int32?
         var title: String?
+        /// The name of the Surface of the same Space this tab is glued beside, on its right.
+        /// See `Space.combos`.
+        var beside: String?
         var kind: String?
         var terminal: Terminal?
     }
@@ -271,6 +274,27 @@ extension Space {
         return rows.filter { keep.contains($0.id) }
     }
 
+    /// A Space's tabs (`terminals`) as stops, in tab order: a tab alone, or a combo of a tab
+    /// and the tab glued beside it, on its right (t8y:/tabs/combo). A tab is glued when its
+    /// `beside` names another of these tabs that is not glued itself, and no tab before it is
+    /// glued there. Any other `beside`, such as one naming a tab that has gone, glues nothing.
+    /// Two tabs per combo, for now; t8y:/tabs/combo-many would chain them.
+    static func combos(_ tabs: [Surface]) -> [[Surface]] {
+        let byName = Dictionary(tabs.map { ($0.metadata.name, $0) }) { a, _ in a }
+        func target(_ tab: Surface) -> Surface? {
+            tab.spec.beside.flatMap { $0 == tab.metadata.name ? nil : byName[$0] }
+        }
+        var glued: [String: Surface] = [:]
+        for tab in tabs {
+            guard let main = target(tab), target(main) == nil, glued[main.metadata.name] == nil else { continue }
+            glued[main.metadata.name] = tab
+        }
+        let gluedNames = Set(glued.values.map(\.metadata.name))
+        return tabs.filter { !gluedNames.contains($0.metadata.name) }.map { tab in
+            [tab] + (glued[tab.metadata.name].map { [$0] } ?? [])
+        }
+    }
+
     /// This space's terminal Surfaces, sorted by order, then name.
     func terminals(_ surfaces: [Surface]) -> [Surface] {
         surfaces
@@ -394,6 +418,9 @@ final class SpaceStore: ObservableObject {
         }
         watchedHosts = names
     }
+
+    /// Drops a Surface dense has just deleted, before dennet's watch says it's gone.
+    func forget(surface id: String) { surfaces[id] = nil }
 
     /// The Den a terminal Surface attaches to, if dennet has it.
     func den(of surface: Surface) -> Den? {

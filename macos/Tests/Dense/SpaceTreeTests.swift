@@ -118,4 +118,18 @@ struct SpaceTreeTests {
         ]
         #expect(space("a").terminals(surfaces).map(\.metadata.name) == ["first", "second"])
     }
+
+    @Test func combosGlueATabBesideAnotherThatIsNotGlued() {
+        func tab(_ name: String, beside: String? = nil) -> Surface {
+            Surface(metadata: .init(name: name, namespace: "default"), spec: .init(space: "a", beside: beside))
+        }
+        func names(_ tabs: [Surface]) -> [[String]] { Space.combos(tabs).map { $0.map(\.metadata.name) } }
+        // A glued tab shows right of its main tab, wherever it is in the order.
+        #expect(names([tab("a"), tab("b"), tab("c", beside: "a")]) == [["a", "c"], ["b"]])
+        // Gone, itself, or a tab glued itself: no glue.
+        #expect(names([tab("a", beside: "gone"), tab("b", beside: "b")]) == [["a"], ["b"]])
+        #expect(names([tab("a"), tab("b", beside: "a"), tab("c", beside: "b")]) == [["a", "b"], ["c"]])
+        // Two tabs per combo: the first glued wins.
+        #expect(names([tab("a"), tab("b", beside: "a"), tab("c", beside: "a")]) == [["a", "b"], ["c"]])
+    }
 }
