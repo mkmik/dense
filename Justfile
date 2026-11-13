@@ -17,6 +17,10 @@ release: build
     hdiutil create -volname Dense -srcfolder "$staging" -ov -format UDZO zig-out/Dense.dmg
     tar -czf zig-out/Dense.tar.gz -C "$staging" Dense.app
 
+# Build a release and run it beside the installed Dense, with a "Preview" badge
+preview: build
+    env -u DEN_SOCKET open -n ./zig-out/Dense.app
+
 # Build a release and install it as /Applications/Dense.app (a running Dense offers to restart into it)
 install: build
     rm -rf /Applications/Dense.app

@@ -67,3 +67,23 @@ struct NewBuildPill: View {
         }
     }
 }
+
+/// An orange "Preview" pill in the window's top corner when this copy runs from
+/// anywhere but /Applications (e.g. `just preview`), so it can be told apart from the
+/// installed one attached to the same den.
+struct PreviewPill: View {
+    private static let isPreview = !Bundle.main.bundlePath.hasPrefix("/Applications/")
+
+    var body: some View {
+        if Self.isPreview {
+            Text("Preview")
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.orange))
+                .foregroundColor(.white)
+                .help(Bundle.main.bundlePath)
+                .padding(.trailing, 9)
+        }
+    }
+}

@@ -92,6 +92,7 @@ struct SpaceWindowView<Terminal: View>: View {
         // opacity twice; draw this only outside the terminal if that bothers anyone.
         .background(ghostty.config.backgroundColor.opacity(ghostty.config.backgroundOpacity))
         .overlay(alignment: .bottomTrailing) { NewBuildPill() }
+        .overlay(alignment: .topTrailing) { PreviewPill().frame(height: Self.titlebarHeight) }
         // Over both, so it stays put whether the sidebar is shown or not.
         .overlay(alignment: .topLeading) {
             NotWindowDraggable(content: Button { sidebarHidden.toggle() } label: {
