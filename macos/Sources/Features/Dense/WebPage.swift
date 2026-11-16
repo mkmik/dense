@@ -9,7 +9,7 @@ import WebKit
 /// Without `navigation`, the tab shows only its page: a link clicked there opens in the
 /// default browser instead. The page's own scripts may still load other pages.
 final class WebPage: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
-    let view = PageView()
+    let view: PageView
 
     /// Asks for another page for the tab; Change Page… in the page's menu, without navigation.
     var change: (() -> Void)?
@@ -24,8 +24,18 @@ final class WebPage: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     private var observations: [NSKeyValueObservation] = []
 
-    init(_ spec: Surface.Web) {
+    /// The namespace of the tab's Surface. When it is a Host's, the tab browses from that
+    /// Host (see HostProxies).
+    let namespace: String
+
+    init(_ spec: Surface.Web, namespace: String = "default") {
         self.spec = spec
+        self.namespace = namespace
+        let configuration = WKWebViewConfiguration()
+        if #available(macOS 14, *), SpaceStore.shared.host(named: namespace) != nil {
+            configuration.websiteDataStore = HostProxies.shared.store(namespace)
+        }
+        view = PageView(frame: .zero, configuration: configuration)
         super.init()
         view.page = self
         view.navigationDelegate = self
@@ -93,6 +103,33 @@ final class WebPage: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         decidePolicyFor action: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
+        // In a tab on a Host, nothing loads until the Host's proxy runs, and a page on its
+        // localhost is loaded as <host>.localhost, which goes through the proxy.
+        guard #available(macOS 14, *), let host = SpaceStore.shared.host(named: namespace) else {
+            return decidePolicy(webView, action, decisionHandler)
+        }
+        if action.targetFrame?.isMainFrame == true, let url = action.request.url,
+           let onHost = HostProxies.onHost(url, host: host.metadata.name) {
+            decisionHandler(.cancel)
+            webView.load(URLRequest(url: onHost))
+            return
+        }
+        Task { @MainActor in
+            do {
+                try await HostProxies.shared.connect(host)
+                decidePolicy(webView, action, decisionHandler)
+            } catch {
+                decisionHandler(.cancel)
+                webView.loadHTMLString(Self.errorPage(error.localizedDescription), baseURL: nil)
+            }
+        }
+    }
+
+    private func decidePolicy(
+        _ webView: WKWebView,
+        _ action: WKNavigationAction,
+        _ decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
         // A link clicked to another page, without navigation, opens in the default browser.
         // A link within the page (#section) stays.
         guard spec.navigation != true, action.navigationType == .linkActivated,
@@ -117,6 +154,12 @@ final class WebPage: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             Self.openOutside(url)
         }
         return nil
+    }
+
+    /// A page that says what went wrong.
+    static func errorPage(_ message: String) -> String {
+        let text = message.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+        return "<pre style=\"font: 13px -apple-system; white-space: pre-wrap; padding: 16px\">\(text)</pre>"
     }
 
     /// Whether two URLs are the same page, maybe at different #sections.

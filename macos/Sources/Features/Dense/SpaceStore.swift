@@ -441,6 +441,11 @@ final class SpaceStore: ObservableObject {
     func forget(surface id: String) { surfaces[id] = nil }
 
     /// The Den a terminal Surface attaches to, if dennet has it.
+    /// The Host whose objects are in namespace `name`, if it is a Host's.
+    func host(named name: String) -> DennetHost? {
+        hosts.values.first { $0.metadata.name == name }
+    }
+
     func den(of surface: Surface) -> Den? {
         surface.spec.terminal.flatMap { dens[objectID(surface.metadata.namespace, $0.den)] }
     }

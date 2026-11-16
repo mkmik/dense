@@ -270,7 +270,7 @@ final class SpaceTabs: ObservableObject {
         for tab in members {
             if let web = tab.spec.web {
                 if pages[tab.id] == nil {
-                    let page = WebPage(web)
+                    let page = WebPage(web, namespace: tab.metadata.namespace ?? "default")
                     let id = tab.id
                     page.change = { [weak self] in self?.changePage(id) }
                     pages[tab.id] = page
@@ -1224,7 +1224,7 @@ final class SpaceTabs: ObservableObject {
         let sized = size.map { #"[ "$(stty size)" = "\#($0.rows) \#($0.columns)" ] || "# } ?? ""
         let waitForSize = #"trap : WINCH; \#(sized){ sleep 0.5 & wait $!; kill $! 2>/dev/null; }; exec "$0" "$@""#
         var command: [String]
-        if let host = SpaceStore.shared.hosts.values.first(where: { $0.metadata.name == namespace }) {
+        if let host = SpaceStore.shared.host(named: namespace) {
             let debug = UserDefaults.standard.bool(forKey: "dense.debugAttach")
             let dest = host.spec.ssh
             command = ["/bin/sh", "-c", waitForSize,
