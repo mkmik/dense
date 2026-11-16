@@ -259,7 +259,12 @@ final class SpaceTabs: ObservableObject {
         shownCombo = members.map(\.id)
         for tab in members {
             if let web = tab.spec.web {
-                if pages[tab.id] == nil { pages[tab.id] = WebPage(web) }
+                if pages[tab.id] == nil {
+                    let page = WebPage(web)
+                    let id = tab.id
+                    page.change = { [weak self] in self?.changePage(id) }
+                    pages[tab.id] = page
+                }
                 continue
             }
             trees[tab.id] = trees[tab.id].flatMap { $0.allSatisfy(\.processExited) ? nil : $0 }
@@ -482,26 +487,83 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
-    /// Asks for an address and makes a web tab at the end of the selected Space: a browser
-    /// with `navigation`, else a tab that shows only that page. Then shows it.
-    func newWebTab(navigation: Bool) {
+    /// Asks for an address and a title and makes a web tab in the selected Space: a browser
+    /// with `navigation`, else a tab that shows only that page. With `beside`, a tab not in a
+    /// combo, the new tab is glued on its right; else it goes at the end. Then shows it.
+    func newWebTab(navigation: Bool, beside main: Surface? = nil) {
         guard let selected, let space = SpaceStore.shared.spaces[selected] else { return NSSound.beep() }
-        let order = (tabs.compactMap(\.spec.order).max() ?? 0) + 10
-        askTitle(navigation ? "New Browser Tab" : "New Web Page Tab", nil,
-                 placeholder: "Address, or a file's path", button: "Open") { address in
-            guard let url = WebPage.url(address) else { return }
+        // Right after the tab it is glued to, so it stays there when unglued.
+        let order = main.map { ($0.spec.order ?? 0) + 1 } ?? (tabs.compactMap(\.spec.order).max() ?? 0) + 10
+        askWebPage(navigation ? "New Browser Tab" : "New Web Page Tab", button: "Open") { url, title in
+            var spec: [String: Any] = ["space": space.metadata.name, "order": order, "kind": "web",
+                                       "web": ["url": url.absoluteString, "navigation": navigation]]
+            if !title.isEmpty { spec["title"] = title }
+            if let main { spec["beside"] = main.metadata.name }
             Task { @MainActor in
                 do {
+                    // A `beside` left on the tab glued onto would keep this from counting (see glue).
+                    if let main, main.spec.beside != nil,
+                       await !self.patchSpec("surfaces", main.metadata, ["beside": NSNull()], failure: "Could not glue the tab") { return }
                     let surface: Surface = try await SpaceStore.shared.create(
                         "surfaces", kind: "Surface", namespace: space.metadata.namespace ?? "default",
-                        metadata: ["generateName": "\(space.metadata.name)-"],
-                        spec: ["space": space.metadata.name, "order": order, "kind": "web",
-                               "web": ["url": url.absoluteString, "navigation": navigation]])
+                        metadata: ["generateName": "\(space.metadata.name)-"], spec: spec)
                     if self.selected == space.id { self.show(surface) }
                 } catch {
                     self.alert("Could not make a new tab", error)
                 }
             }
+        }
+    }
+
+    /// Asks for another page, and title, for a web tab and writes them to its Surface; the
+    /// tab then shows the new page.
+    func changePage(_ id: String) {
+        guard let surface = SpaceStore.shared.surfaces[id], let web = surface.spec.web else { return NSSound.beep() }
+        let current = web.html != nil ? nil : web.url.flatMap(URL.init(string:)).map { $0.isFileURL ? $0.path : $0.absoluteString }
+        askWebPage("Change Page", address: current, title: surface.spec.title, button: "Open") { url, title in
+            Task { @MainActor in
+                await self.patchSpec("surfaces", surface.metadata,
+                                     ["web": ["url": url.absoluteString, "html": NSNull()],
+                                      "title": title.isEmpty ? NSNull() : title],
+                                     failure: "Could not change the page")
+            }
+        }
+    }
+
+    /// Asks in a sheet for a web page's address (or a file's path) and a title, which may be
+    /// empty. Passes on the address's URL and the trimmed title.
+    private func askWebPage(
+        _ message: String, address: String? = nil, title: String? = nil, button: String,
+        then done: @escaping (URL, String) -> Void
+    ) {
+        let addressField = NSTextField(frame: NSRect(x: 0, y: 30, width: 320, height: 24))
+        addressField.stringValue = address ?? ""
+        addressField.placeholderString = "Address, or a file's path"
+        let titleField = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        titleField.stringValue = title ?? ""
+        titleField.placeholderString = "Title (optional)"
+        addressField.nextKeyView = titleField
+        titleField.nextKeyView = addressField
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 54))
+        box.addSubview(addressField)
+        box.addSubview(titleField)
+
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.accessoryView = box
+        alert.addButton(withTitle: button)
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = addressField
+
+        let open = { (response: NSApplication.ModalResponse) in
+            guard response == .alertFirstButtonReturn else { return }
+            guard let url = WebPage.url(addressField.stringValue) else { return NSSound.beep() }
+            done(url, titleField.stringValue.trimmingCharacters(in: .whitespaces))
+        }
+        if let window = controller?.window {
+            alert.beginSheetModal(for: window, completionHandler: open)
+        } else {
+            open(alert.runModal())
         }
     }
 
