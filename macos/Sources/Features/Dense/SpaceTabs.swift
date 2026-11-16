@@ -63,9 +63,12 @@ final class SpaceTabs: ObservableObject {
     /// in front, and clicking back into the terminal puts the terminal's.
     private var focusWatch: NSKeyValueObservation?
 
-    // ponytail: this window only, until t8y:/tabs/combo#resize keeps it in dennet.
-    /// How much of the window each combo's left tab takes, by its Surface id, as last dragged.
-    private var ratios: [String: Double] = [:]
+    /// Writes how wide the glued tab of the combo in front was dragged, once the drag stops.
+    private var pendingWidth: DispatchWorkItem?
+
+    /// How much of the window the left pane of the combo in front takes, as the line between
+    /// them shows it, for a combo with a web tab. A terminal combo's is in its split tree.
+    @Published var split = 0.5
 
     /// The tab last in front in each Space, by Space id.
     private var lastTab: [String: String]
@@ -245,8 +248,8 @@ final class SpaceTabs: ObservableObject {
     func show(_ surface: Surface?) {
         guard let controller else { return }
 
-        // Keep how wide the panes of the combo in front were.
-        if case let .split(split) = controller.surfaceTree.root, let left = shownCombo.first { ratios[left] = split.ratio }
+        // Keep how wide the panes of the combo in front were dragged, if not yet written.
+        if let pendingWidth { pendingWidth.perform(); pendingWidth.cancel() }
 
         noteShown(surface)
 
@@ -274,10 +277,15 @@ final class SpaceTabs: ObservableObject {
         waiting = false
         let shownTabs = members.filter { trees[$0.id] != nil || pages[$0.id] != nil }
         let newPanes = shownTabs.map { pages[$0.id] }
-        if !newPanes.elementsEqual(panes, by: ===) { panes = newPanes }
+        // How wide the glued tab was dragged, kept with the bond in dennet.
+        let ratio = members.count == 2 ? members[1].spec.width.map { 1 - Double($0) / 100 } ?? 0.5 : 0.5
+        if !newPanes.elementsEqual(panes, by: ===) {
+            panes = newPanes
+            split = ratio
+        }
         let roots = members.compactMap { trees[$0.id]?.root }
         let shown = roots.count < 2 ? members.lazy.compactMap { self.trees[$0.id] }.first ?? .init() : SplitTree(
-            root: .split(.init(direction: .horizontal, ratio: ratios[members[0].id] ?? 0.5, left: roots[0], right: roots[1])),
+            root: .split(.init(direction: .horizontal, ratio: ratio, left: roots[0], right: roots[1])),
             zoomed: nil)
         let old = controller.focusedSurface
         // Moving between the two tabs of a combo only moves the focus.
@@ -292,6 +300,31 @@ final class SpaceTabs: ObservableObject {
                 if font != ctFont as NSFont { font = ctFont as NSFont }
             }
         }
+    }
+
+    // ponytail: another window showing the same combo picks the width up on its next switch.
+    /// The window's terminals changed. If the line between the panes of a terminal combo
+    /// was dragged, the width is kept with the bond. See `dragged(to:)`.
+    func treeChanged(_ tree: SplitTree<Ghostty.SurfaceView>) {
+        if case let .split(split) = tree.root { dragged(to: split.ratio) }
+    }
+
+    /// The line between the panes of the combo in front is at `ratio` of the window, from the
+    /// left: the glued tab's `width` is written to dennet once the drag stops.
+    func dragged(to ratio: Double) {
+        guard shownCombo.count == 2, let glued = SpaceStore.shared.surfaces[shownCombo[1]] else { return }
+        let width = Int32(min(max(((1 - ratio) * 100).rounded(), 1), 99))
+        pendingWidth?.cancel()
+        pendingWidth = nil
+        guard width != glued.spec.width ?? 50 else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingWidth = nil
+            Task { @MainActor in
+                _ = await self?.patchSpec("surfaces", glued.metadata, ["width": width], failure: "Could not keep the width")
+            }
+        }
+        pendingWidth = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     /// Puts a tab in front in the history and in its Space's last and recent tabs.
@@ -941,7 +974,7 @@ final class SpaceTabs: ObservableObject {
             // keep this from counting.
             if main.spec.beside != nil,
                await !self.patchSpec("surfaces", main.metadata, ["beside": NSNull()], failure: "Could not glue the tab") { return }
-            guard await self.patchSpec("surfaces", surface.metadata, ["beside": main.metadata.name],
+            guard await self.patchSpec("surfaces", surface.metadata, ["beside": main.metadata.name, "width": NSNull()],
                                        failure: "Could not glue the tab") else { return }
             if self.tabs.contains(where: { $0.id == id }) { self.show(surface) }
         }

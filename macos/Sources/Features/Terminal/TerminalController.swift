@@ -150,6 +150,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // we want to invalidate our state.
         invalidateRestorableState()
 
+        // dense: a combo's panes dragged wider or narrower are kept in dennet.
+        spaceTabs.treeChanged(to)
+
         // Update our zoom state
         if let window = window as? TerminalWindow {
             window.surfaceIsZoomed = to.isZoomed

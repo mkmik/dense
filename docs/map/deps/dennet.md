@@ -23,6 +23,13 @@ id = "web"
 title = "A Surface kind web, with a page (url or html) and navigation"
 status = "done"
 note = "spec.web; t8y:/api/surface#web in dennet's map"
+
+[[feature]]
+id = "glue-width"
+title = "A Surface field keeping how wide a glued Surface is"
+status = "done"
+milestone = "m1"
+note = "spec.width, in percent; t8y:/api/surface#glue-width in dennet's map"
 +++
 
 Only what dense needs from dennet. dennet has its own map.

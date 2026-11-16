@@ -85,16 +85,26 @@ struct SpaceWindowView<Terminal: View>: View {
                     terminal.padding(.leading, 8)
                 } else {
                     // A combo with a web tab: the page and the terminal area (or another
-                    // page), with a line between them to drag.
-                    // ponytail: the line starts in the middle each time; a terminal combo's
-                    // width is kept (see SpaceTabs.ratios).
-                    HSplitView {
-                        ForEach(Array(tabs.panes.enumerated()), id: \.offset) { _, page in
-                            Group {
-                                if let page { WebPane(page: page) } else { terminal.padding(.leading, 8) }
-                            }
-                            .frame(minWidth: 100, maxWidth: .infinity, maxHeight: .infinity)
+                    // page), with a line between them to drag. How wide, is kept with the
+                    // bond (see SpaceTabs.dragged).
+                    let pane = { (page: WebPage?) in
+                        Group {
+                            if let page { WebPane(page: page) } else { terminal.padding(.leading, 8) }
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    if tabs.panes.count == 2 {
+                        SplitView(.horizontal, .init(get: { CGFloat(tabs.split) }, set: {
+                            tabs.split = Double($0)
+                            tabs.dragged(to: Double($0))
+                        }), dividerColor: ghostty.config.splitDividerColor,
+                                  left: { pane(tabs.panes[0]) }, right: { pane(tabs.panes[1]) },
+                                  onEqualize: {
+                            tabs.split = 0.5
+                            tabs.dragged(to: 0.5)
+                        })
+                    } else {
+                        ForEach(Array(tabs.panes.enumerated()), id: \.offset) { _, page in pane(page) }
                     }
                 }
             }
