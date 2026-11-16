@@ -11,12 +11,8 @@ on = "/tabs/combo"
 why = "It opens glued to the agent's tab, as Claude Desktop shows artifacts"
 
 [[needs]]
-fuzzy = "a Surface kind in dennet for content that is not a terminal"
-why = "Today the only kind is terminal"
-
-[[needs]]
-fuzzy = "a renderer: an embedded web view, or native SwiftUI from A2UI"
-why = "Something has to draw the artifact"
+on = "/show/web#page"
+why = "An html web tab can draw the artifact; native SwiftUI from A2UI is the other way"
 +++
 
 The reason for combo tabs. Not designed yet.
