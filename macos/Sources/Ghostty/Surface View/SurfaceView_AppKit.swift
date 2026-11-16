@@ -882,6 +882,17 @@ extension Ghostty {
                 userInfo: nil))
         }
 
+        // dense: a tab that is switched away is taken out of the window, but its
+        // window stays visible, so it never hears of occlusion and keeps its GPU
+        // buffers (3 screen-sized render targets per surface). Tell it here.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let visible = window?.occlusionState.contains(.visible) ?? false
+            guard let surface, visible != isWindowVisible else { return }
+            ghostty_surface_set_occlusion(surface, visible)
+            isWindowVisible = visible
+        }
+
         override func viewDidChangeBackingProperties() {
             super.viewDidChangeBackingProperties()
 
