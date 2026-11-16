@@ -869,15 +869,23 @@ extension Ghostty {
             }
 
             // Open with the default application for the URL
-            NSWorkspace.shared.open(url)
+            openWeb(url)
             return true
+        }
+
+        /// dense: opens a URL in a browser tab of the key window when `SpaceTabs.openLinksKey`
+        /// asks for it and it is a web link, else with its default application.
+        private static func openWeb(_ url: URL) {
+            if let tabs = (NSApp.keyWindow?.windowController as? TerminalController)?.spaceTabs,
+               tabs.openLink(url) { return }
+            NSWorkspace.shared.open(url)
         }
 
         private static func openUntrustedURL(_ value: String) -> Bool {
             let target = UntrustedURL(value)
             switch target.decision {
             case .allow(let url):
-                _ = NSWorkspace.shared.open(url)
+                openWeb(url)
 
             case .confirm(let url):
                 UntrustedURLAlert.presentConfirmation(

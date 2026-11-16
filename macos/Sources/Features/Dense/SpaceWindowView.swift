@@ -19,6 +19,9 @@ struct SpaceWindowView<Terminal: View>: View {
     @State private var dragStartWidth: Double?
     /// Whether the sidebar is folded away, in this window only.
     @State private var sidebarHidden = false
+    /// Where web links clicked in a terminal open (see SpaceTabs.openLinksKey): "tab" for a
+    /// browser tab here, else the default browser. The globe at the top right flips it.
+    @AppStorage(SpaceTabs.openLinksKey) private var openLinks = ""
 
     /// The height of the titlebar row the window buttons sit in.
     static var titlebarHeight: CGFloat { 28 }
@@ -68,8 +71,9 @@ struct SpaceWindowView<Terminal: View>: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 8)
-                // Clear of the window buttons and the sidebar button.
+                // Clear of the window buttons and the sidebar button, and of the globe.
                 .padding(.leading, sidebarHidden ? Self.sidebarButtonX + 22 : 0)
+                .padding(.trailing, 30)
                 .frame(height: Self.titlebarHeight)
                 if tabs.selected != nil && (tabs.active == nil || tabs.waiting) {
                     VStack(spacing: 12) {
@@ -116,7 +120,21 @@ struct SpaceWindowView<Terminal: View>: View {
         // opacity twice; draw this only outside the terminal if that bothers anyone.
         .background(ghostty.config.backgroundColor.opacity(ghostty.config.backgroundOpacity))
         .overlay(alignment: .bottomTrailing) { NewBuildPill() }
-        .overlay(alignment: .topTrailing) { PreviewPill().frame(height: Self.titlebarHeight) }
+        .overlay(alignment: .topTrailing) {
+            HStack(spacing: 0) {
+                NotWindowDraggable(content: Button { openLinks = openLinks == "tab" ? "" : "tab" } label: {
+                    Image(systemName: "globe").frame(width: 22, height: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(openLinks == "tab" ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .help(openLinks == "tab"
+                      ? "Links open in a browser tab here. Click to open them in the default browser."
+                      : "Links open in the default browser. Click to open them in a browser tab here."))
+                .padding(.trailing, 8)
+                PreviewPill()
+            }
+            .frame(height: Self.titlebarHeight)
+        }
         // Over both, so it stays put whether the sidebar is shown or not.
         .overlay(alignment: .topLeading) {
             NotWindowDraggable(content: Button { sidebarHidden.toggle() } label: {

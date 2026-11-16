@@ -520,22 +520,43 @@ final class SpaceTabs: ObservableObject {
         // Right after the tab it is glued to, so it stays there when unglued.
         let order = main.map { ($0.spec.order ?? 0) + 1 } ?? (tabs.compactMap(\.spec.order).max() ?? 0) + 10
         askWebPage(navigation ? "New Browser Tab" : "New Web Page Tab", button: "Open") { url, title in
-            var spec: [String: Any] = ["space": space.metadata.name, "order": order, "kind": "web",
-                                       "web": ["url": url.absoluteString, "navigation": navigation]]
-            if !title.isEmpty { spec["title"] = title }
-            if let main { spec["beside"] = main.metadata.name }
-            Task { @MainActor in
-                do {
-                    // A `beside` left on the tab glued onto would keep this from counting (see glue).
-                    if let main, main.spec.beside != nil,
-                       await !self.patchSpec("surfaces", main.metadata, ["beside": NSNull()], failure: "Could not glue the tab") { return }
-                    let surface: Surface = try await SpaceStore.shared.create(
-                        "surfaces", kind: "Surface", namespace: space.metadata.namespace ?? "default",
-                        metadata: ["generateName": "\(space.metadata.name)-"], spec: spec)
-                    if self.selected == space.id { self.show(surface) }
-                } catch {
-                    self.alert("Could not make a new tab", error)
-                }
+            self.makeWebTab(space, order: order, url: url, title: title, navigation: navigation, beside: main)
+        }
+    }
+
+    /// Where a web link clicked in a terminal opens: "tab" opens it in a new browser tab in
+    /// the window's Space; unset (or anything else) in the default browser. Set with
+    /// `defaults write pub.mkm.dense dense.openLinks tab`.
+    static let openLinksKey = "dense.openLinks"
+
+    /// Opens a web link in a new browser tab at the end of the selected Space, if
+    /// `openLinksKey` asks for it. False when it doesn't, or there is no Space to open it in.
+    func openLink(_ url: URL) -> Bool {
+        guard UserDefaults.standard.string(forKey: Self.openLinksKey) == "tab",
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              let selected, let space = SpaceStore.shared.spaces[selected] else { return false }
+        let order = (tabs.compactMap(\.spec.order).max() ?? 0) + 10
+        makeWebTab(space, order: order, url: url, title: "", navigation: true, beside: nil)
+        return true
+    }
+
+    /// Makes a web tab in a Space, as newWebTab says, and shows it.
+    private func makeWebTab(_ space: Space, order: Int32, url: URL, title: String, navigation: Bool, beside main: Surface?) {
+        var spec: [String: Any] = ["space": space.metadata.name, "order": order, "kind": "web",
+                                   "web": ["url": url.absoluteString, "navigation": navigation]]
+        if !title.isEmpty { spec["title"] = title }
+        if let main { spec["beside"] = main.metadata.name }
+        Task { @MainActor in
+            do {
+                // A `beside` left on the tab glued onto would keep this from counting (see glue).
+                if let main, main.spec.beside != nil,
+                   await !self.patchSpec("surfaces", main.metadata, ["beside": NSNull()], failure: "Could not glue the tab") { return }
+                let surface: Surface = try await SpaceStore.shared.create(
+                    "surfaces", kind: "Surface", namespace: space.metadata.namespace ?? "default",
+                    metadata: ["generateName": "\(space.metadata.name)-"], spec: spec)
+                if self.selected == space.id { self.show(surface) }
+            } catch {
+                self.alert("Could not make a new tab", error)
             }
         }
     }
