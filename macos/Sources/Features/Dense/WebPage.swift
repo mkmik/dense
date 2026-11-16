@@ -9,7 +9,10 @@ import WebKit
 /// Without `navigation`, the tab shows only its page: a link clicked there opens in the
 /// default browser instead. The page's own scripts may still load other pages.
 final class WebPage: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
-    let view = WKWebView()
+    let view = PageView()
+
+    /// Asks for another page for the tab; Change Page… in the page's menu, without navigation.
+    var change: (() -> Void)?
 
     /// What the tab's Surface asks for, as last loaded.
     @Published private(set) var spec: Surface.Web
@@ -24,6 +27,7 @@ final class WebPage: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     init(_ spec: Surface.Web) {
         self.spec = spec
         super.init()
+        view.page = self
         view.navigationDelegate = self
         view.uiDelegate = self
         view.allowsBackForwardNavigationGestures = spec.navigation == true
@@ -130,6 +134,22 @@ final class WebPage: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         guard ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") else { return NSSound.beep() }
         NSWorkspace.shared.open(url)
     }
+}
+
+/// A page's web view, whose right-click menu has Change Page… when the tab shows one page.
+final class PageView: WKWebView {
+    weak var page: WebPage?
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        guard let page, page.spec.navigation != true, page.change != nil else { return }
+        let item = NSMenuItem(title: "Change Page…", action: #selector(changePage), keyEquivalent: "")
+        item.target = self
+        menu.addItem(.separator())
+        menu.addItem(item)
+    }
+
+    @objc private func changePage() { page?.change?() }
 }
 
 /// A web tab in the window: its page, under a toolbar if it is a browser.

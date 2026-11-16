@@ -30,6 +30,18 @@ needs = ["/tabs/combo#side-by-side"]
 id = "new"
 title = "New Browser Tab… and New Web Page Tab… in the command palette"
 status = "done"
+note = "The sheet asks for the address, or a file's path, and a title"
+
+[[feature]]
+id = "new-beside"
+title = "New Browser Beside Tab… and New Web Page Beside Tab…: a new web tab glued on the right of the tab in front"
+status = "done"
+needs = ["/tabs/combo#side-by-side"]
+
+[[feature]]
+id = "change"
+title = "Change Page… in a one-page tab's right-click menu: another address or file, and title"
+status = "done"
 
 [[feature]]
 id = "keys"

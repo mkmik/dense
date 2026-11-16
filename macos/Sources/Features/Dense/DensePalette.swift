@@ -46,10 +46,20 @@ extension SpaceTabs {
             if combo(of: tab).count > 1 {
                 options.append(CommandOption(title: "Unglue Tab", description: "Show the two tabs of this combo as tabs of their own",
                                              leadingIcon: "rectangle") { self.unglue(tab.id) })
-            } else if let left = glueTarget(left: tab.id) {
-                options.append(CommandOption(title: "Glue to Tab on the Left", subtitle: left.spec.title,
-                                             description: "Show this tab beside the tab on its left, as one combo tab",
-                                             leadingIcon: "rectangle.split.2x1") { self.glue(tab.id, beside: left.id) })
+            } else {
+                options += [
+                    CommandOption(title: "New Browser Beside Tab…", subtitle: tab.spec.title,
+                                  description: "A browser glued on the right of this tab, as one combo tab",
+                                  leadingIcon: "globe") { self.newWebTab(navigation: true, beside: tab) },
+                    CommandOption(title: "New Web Page Beside Tab…", subtitle: tab.spec.title,
+                                  description: "One page glued on the right of this tab, as one combo tab",
+                                  leadingIcon: "doc.richtext") { self.newWebTab(navigation: false, beside: tab) },
+                ]
+                if let left = glueTarget(left: tab.id) {
+                    options.append(CommandOption(title: "Glue to Tab on the Left", subtitle: left.spec.title,
+                                                 description: "Show this tab beside the tab on its left, as one combo tab",
+                                                 leadingIcon: "rectangle.split.2x1") { self.glue(tab.id, beside: left.id) })
+                }
             }
             if store.den(of: tab)?.running == false {
                 options.append(CommandOption(title: "Restart Den", leadingIcon: "arrow.clockwise") { self.restartDen(tab) })
