@@ -64,9 +64,9 @@ needs = ["#side-by-side"]
 [[feature]]
 id = "resize"
 title = "Drag the line between the panes; the width is kept with the bond"
-status = "todo"
-note = "The line drags, and the window keeps the width until it closes; keeping it longer needs a field in dennet"
-needs = ["#side-by-side"]
+status = "done"
+note = "The glued tab's spec.width in dennet, in percent, written once the drag stops; a new bond starts at half"
+needs = ["#side-by-side", "/deps/dennet#glue-width"]
 
 [[feature]]
 id = "top-bottom"
@@ -106,10 +106,15 @@ side by side; top and bottom is not wanted.
 ## How it is built
 
 `Space.combos` works out the combos from `spec.beside`. `SpaceTabs` keeps
-one terminal per tab and, for a combo, puts both in one horizontal
+one terminal per tab and, for a combo of two terminals, puts both in one horizontal
 `SplitTree` in the window; the focused pane's tab is the one in front.
 The bond is not a split inside one tab's tree: a split there would hide
 one tab from the tab bar.
+
+How wide the glued tab is, dragged on the line between the panes, is its
+`spec.width` in dennet, in percent, next to `spec.beside`; gluing clears
+it, so a new bond starts at half. Another window showing the same combo
+picks a new width up the next time it shows the combo.
 
 A bond naming a Surface that has gone counts as no bond, so closing one
 tab of a combo leaves the other as a plain tab, with nothing to clean up

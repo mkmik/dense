@@ -59,6 +59,8 @@ struct Surface: DennetObject {
         /// The name of the Surface of the same Space this tab is glued beside, on its right.
         /// See `Space.combos`.
         var beside: String?
+        /// How much of the combo's width this tab takes when glued, in percent; nil is half.
+        var width: Int32?
         var kind: String?
         var terminal: Terminal?
         var web: Web?

@@ -23,7 +23,7 @@ note = "Where it browses stays in the window; the Surface keeps the page it star
 id = "combo"
 title = "Glued beside a terminal, or another web tab, side by side"
 status = "done"
-note = "The line between them drags, but starts in the middle each time"
+note = "The line between them drags, and the width is kept with the bond, as t8y:/tabs/combo#resize"
 needs = ["/tabs/combo#side-by-side"]
 
 [[feature]]
