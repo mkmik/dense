@@ -17,6 +17,12 @@ title = "A Surface field naming the Surface it is glued beside"
 status = "done"
 milestone = "m1"
 note = "spec.beside; t8y:/api/surface#glue in dennet's map"
+
+[[feature]]
+id = "web"
+title = "A Surface kind web, with a page (url or html) and navigation"
+status = "done"
+note = "spec.web; t8y:/api/surface#web in dennet's map"
 +++
 
 Only what dense needs from dennet. dennet has its own map.

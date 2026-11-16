@@ -105,18 +105,19 @@ struct SpaceTreeTests {
         #expect(rows.map(\.space.metadata.name) == ["a"])
     }
 
-    @Test func terminalsAreTheSpacesTerminalSurfacesInOrder() {
-        func surface(_ name: String, space: String, order: Int32, den: String? = "d") -> Surface {
+    @Test func tabsAreTheSpacesTerminalAndWebSurfacesInOrder() {
+        func surface(_ name: String, space: String, order: Int32, den: String? = "d", web: Surface.Web? = nil) -> Surface {
             Surface(metadata: .init(name: name, namespace: "default"),
-                    spec: .init(space: space, order: order, terminal: den.map { .init(den: $0) }))
+                    spec: .init(space: space, order: order, terminal: den.map { .init(den: $0) }, web: web))
         }
         let surfaces = [
             surface("second", space: "a", order: 2),
             surface("first", space: "a", order: 1),
             surface("other", space: "b", order: 0),
-            surface("browser", space: "a", order: 0, den: nil),
+            surface("page", space: "a", order: 3, den: nil, web: .init(html: "<p>")),
+            surface("notes", space: "a", order: 0, den: nil),
         ]
-        #expect(space("a").terminals(surfaces).map(\.metadata.name) == ["first", "second"])
+        #expect(space("a").tabs(surfaces).map(\.metadata.name) == ["first", "second", "page"])
     }
 
     @Test func combosGlueATabBesideAnotherThatIsNotGlued() {

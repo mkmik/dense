@@ -1323,8 +1323,15 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     }
 
     @IBAction func newTab(_ sender: Any?) {
-        guard let surface = focusedSurface?.surface else { return }
+        // dense: with only a web tab shown there is no terminal to ask.
+        guard let surface = focusedSurface?.surface else { return spaceTabs.newTab(nil) }
         ghostty.newTab(surface: surface)
+    }
+
+    /// dense: Close (⌘W) on a web tab closes it; Ghostty's closes the focused terminal.
+    override func close(_ sender: Any) {
+        if spaceTabs.activeIsWeb && spaceTabs.closeActiveTab(ask: true) { return }
+        super.close(sender)
     }
 
     @IBAction func closeTab(_ sender: Any?) {

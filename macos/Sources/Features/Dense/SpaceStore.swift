@@ -61,11 +61,23 @@ struct Surface: DennetObject {
         var beside: String?
         var kind: String?
         var terminal: Terminal?
+        var web: Web?
     }
 
     struct Terminal: Decodable, Equatable {
         /// The name of the Den to attach to, in the same namespace.
         var den: String
+    }
+
+    /// A web page, shown in a tab by `WebPage`. dennet sees that one of `url` and `html` is set.
+    struct Web: Decodable, Equatable {
+        /// The page to show. A file:// URL is a file on this Mac.
+        var url: String?
+        /// The page itself, shown instead of `url`, and again each time it changes.
+        var html: String?
+        /// Whether the tab is a browser: links open in it, and it has back, forward, reload
+        /// and an address field. Without it the tab shows only this page.
+        var navigation: Bool?
     }
 
     var metadata: ObjectMeta
@@ -274,7 +286,7 @@ extension Space {
         return rows.filter { keep.contains($0.id) }
     }
 
-    /// A Space's tabs (`terminals`) as stops, in tab order: a tab alone, or a combo of a tab
+    /// A Space's tabs (`tabs`) as stops, in tab order: a tab alone, or a combo of a tab
     /// and the tab glued beside it, on its right (t8y:/tabs/combo). A tab is glued when its
     /// `beside` names another of these tabs that is not glued itself, and no tab before it is
     /// glued there. Any other `beside`, such as one naming a tab that has gone, glues nothing.
@@ -295,10 +307,14 @@ extension Space {
         }
     }
 
-    /// This space's terminal Surfaces, sorted by order, then name.
-    func terminals(_ surfaces: [Surface]) -> [Surface] {
+    /// This space's tabs: its Surfaces of a kind dense shows (terminal and web), sorted by
+    /// order, then name.
+    func tabs(_ surfaces: [Surface]) -> [Surface] {
         surfaces
-            .filter { $0.metadata.namespace == metadata.namespace && $0.spec.space == metadata.name && $0.spec.terminal != nil }
+            .filter {
+                $0.metadata.namespace == metadata.namespace && $0.spec.space == metadata.name
+                    && ($0.spec.terminal != nil || $0.spec.web != nil)
+            }
             .sorted { ($0.spec.order ?? 0, $0.metadata.name) < ($1.spec.order ?? 0, $1.metadata.name) }
     }
 }
