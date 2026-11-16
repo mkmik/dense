@@ -1333,7 +1333,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     /// dense: Close (⌘W) on a web tab closes it; Ghostty's closes the focused terminal.
     override func close(_ sender: Any) {
-        if spaceTabs.activeIsWeb && spaceTabs.closeActiveTab(ask: true) { return }
+        // A web tab, or a tab whose den stopped, has no terminal for ⌘W to close: close the tab.
+        if (spaceTabs.activeIsWeb || spaceTabs.waiting) && spaceTabs.closeActiveTab(ask: true) { return }
         super.close(sender)
     }
 
