@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import UniformTypeIdentifiers
 import GhosttyKit
 
 /// The Space shown in one window, and which of its tabs (Surfaces) is in front.
@@ -529,15 +530,23 @@ final class SpaceTabs: ObservableObject {
     /// `defaults write pub.mkm.dense dense.openLinks tab`.
     static let openLinksKey = "dense.openLinks"
 
-    /// Opens a web link in a new browser tab at the end of the selected Space, if
-    /// `openLinksKey` asks for it. False when it doesn't, or there is no Space to open it in.
+    /// Opens a web link, or a file a page can show, in a new browser tab at the end of the
+    /// selected Space, if `openLinksKey` asks for it. False when it doesn't, or there is no Space to open it in.
     func openLink(_ url: URL) -> Bool {
         guard UserDefaults.standard.string(forKey: Self.openLinksKey) == "tab",
-              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "") || Self.showsInPage(url),
               let selected, let space = SpaceStore.shared.spaces[selected] else { return false }
         let order = (tabs.compactMap(\.spec.order).max() ?? 0) + 10
         makeWebTab(space, order: order, url: url, title: "", navigation: true, beside: nil)
         return true
+    }
+
+    /// Whether a file link is something a browser tab can show: a page, a picture or a PDF.
+    /// Text, folders and other files still open with their default application.
+    private static func showsInPage(_ url: URL) -> Bool {
+        guard url.isFileURL,
+              let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType else { return false }
+        return [UTType.html, .image, .pdf].contains { type.conforms(to: $0) }
     }
 
     /// Makes a web tab in a Space, as newWebTab says, and shows it.
