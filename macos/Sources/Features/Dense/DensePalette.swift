@@ -30,6 +30,10 @@ extension SpaceTabs {
         if let space {
             let name = Self.title(space)
             options += [
+                CommandOption(title: "New Browser Tab…", subtitle: name, description: "A tab that browses the web",
+                              leadingIcon: "globe") { self.newWebTab(navigation: true) },
+                CommandOption(title: "New Web Page Tab…", subtitle: name, description: "A tab that shows one page; links open in the browser",
+                              leadingIcon: "doc.richtext") { self.newWebTab(navigation: false) },
                 CommandOption(title: "New Subspace", subtitle: name, leadingIcon: "folder.badge.plus") { self.newSpace(parent: space) },
                 CommandOption(title: "Rename Space", subtitle: name, leadingIcon: "pencil") { self.renameSpace(space) },
                 CommandOption(title: "Edit Space Tags", subtitle: name, leadingIcon: "tag") { self.editTags(space) },

@@ -13,6 +13,10 @@ import GhosttyKit
 /// changes. Tabs out of view keep running, so switching is instant and nothing attaches
 /// twice. The terminal the window opened with is closed as soon as a tab is shown.
 ///
+/// A web Surface's tab shows a `WebPage` instead, beside the terminal area or in its place
+/// (`panes`). It too is kept while out of view, and loads its page again when its Surface
+/// changes it.
+///
 /// dense has no macOS window tabs. Ghostty's tab commands (new tab, go to tab, move tab,
 /// close tab), from key bindings, menus, AppleScript, Shortcuts or Services, act on these
 /// tabs instead. A new tab is a new Den and Surface in dennet; dense does not start the
@@ -44,9 +48,20 @@ final class SpaceTabs: ObservableObject {
     /// is one terminal.
     private var trees: [String: SplitTree<Ghostty.SurfaceView>] = [:]
 
+    /// Each web tab's page, by Surface id.
+    private var pages: [String: WebPage] = [:]
+
     /// The tabs in the window: the tab in front and, if it is in a combo, the other one, left
     /// first. The other one's terminal may be missing, while its den doesn't run.
     private var shownCombo: [String] = []
+
+    /// What the window shows, left first: a web tab's page, or nil for the terminal area,
+    /// which shows the terminals of the tabs in `shownCombo`. Empty with no tab shown.
+    @Published private(set) var panes: [WebPage?] = []
+
+    /// Watches which view has the focus, so clicking into a web page in a combo puts its tab
+    /// in front, and clicking back into the terminal puts the terminal's.
+    private var focusWatch: NSKeyValueObservation?
 
     // ponytail: this window only, until t8y:/tabs/combo#resize keeps it in dennet.
     /// How much of the window each combo's left tab takes, by its Surface id, as last dragged.
@@ -120,9 +135,18 @@ final class SpaceTabs: ObservableObject {
             self.show(surface)
         }
 
-        // A combo glued or unglued, from this window or elsewhere, changes what is shown.
-        surfaceChanges = store.$surfaces.receive(on: DispatchQueue.main).sink { [weak self] _ in
-            guard let self, let surface = self.active.flatMap({ store.surfaces[$0] }),
+        // A combo glued or unglued, from this window or elsewhere, changes what is shown. A
+        // web tab whose page changed loads it again; one whose Surface has gone drops it.
+        surfaceChanges = store.$surfaces.receive(on: DispatchQueue.main).sink { [weak self] surfaces in
+            guard let self else { return }
+            for (id, page) in self.pages {
+                if let web = surfaces[id]?.spec.web {
+                    if web != page.spec { page.load(web) }
+                } else if !self.shownCombo.contains(id) {
+                    self.pages[id] = nil
+                }
+            }
+            guard let surface = self.active.flatMap({ surfaces[$0] }),
                   self.combo(of: surface).map(\.id) != self.shownCombo else { return }
             self.show(surface)
         }
@@ -189,10 +213,10 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
-    /// The selected Space's terminal tabs, in order.
+    /// The selected Space's tabs, in order.
     var tabs: [Surface] {
         guard let selected, let space = SpaceStore.shared.spaces[selected] else { return [] }
-        return space.terminals(Array(SpaceStore.shared.surfaces.values))
+        return space.tabs(Array(SpaceStore.shared.surfaces.values))
     }
 
     /// The selected Space's tabs as stops: a tab alone, or a combo (see `Space.combos`).
@@ -202,7 +226,7 @@ final class SpaceTabs: ObservableObject {
     func combo(of surface: Surface) -> [Surface] {
         let store = SpaceStore.shared
         guard let space = store.spaces[objectID(surface.metadata.namespace, surface.spec.space)] else { return [surface] }
-        return Space.combos(space.terminals(Array(store.surfaces.values))).first { $0.contains { $0.id == surface.id } }
+        return Space.combos(space.tabs(Array(store.surfaces.values))).first { $0.contains { $0.id == surface.id } }
             ?? [surface]
     }
 
@@ -226,30 +250,41 @@ final class SpaceTabs: ObservableObject {
 
         noteShown(surface)
 
-        // Each tab's terminal. One whose den attach has exited is attached again, if its den
-        // runs. The window's own terminal, shown before any tab, is dropped.
+        // Each tab's terminal, or page. A terminal whose den attach has exited is attached
+        // again, if its den runs. The window's own terminal, shown before any tab, is dropped.
         let members = surface.map(combo(of:)) ?? []
         shownCombo = members.map(\.id)
         for tab in members {
+            if let web = tab.spec.web {
+                if pages[tab.id] == nil { pages[tab.id] = WebPage(web) }
+                continue
+            }
             trees[tab.id] = trees[tab.id].flatMap { $0.allSatisfy(\.processExited) ? nil : $0 }
             if trees[tab.id] == nil, SpaceStore.shared.den(of: tab)?.running == true {
                 trees[tab.id] = SplitTree(view: makeView(tab, controller: controller))
             }
         }
-        guard let surface, let tree = trees[surface.id] else {
+        watchFocus(controller)
+        guard let surface, trees[surface.id] != nil || pages[surface.id] != nil else {
             waiting = surface != nil
+            panes = []
             controller.surfaceTree = .init()
             return
         }
         waiting = false
+        let shownTabs = members.filter { trees[$0.id] != nil || pages[$0.id] != nil }
+        let newPanes = shownTabs.map { pages[$0.id] }
+        if !newPanes.elementsEqual(panes, by: ===) { panes = newPanes }
         let roots = members.compactMap { trees[$0.id]?.root }
-        let shown = roots.count < 2 ? tree : SplitTree(
+        let shown = roots.count < 2 ? members.lazy.compactMap { self.trees[$0.id] }.first ?? .init() : SplitTree(
             root: .split(.init(direction: .horizontal, ratio: ratios[members[0].id] ?? 0.5, left: roots[0], right: roots[1])),
             zoomed: nil)
         let old = controller.focusedSurface
         // Moving between the two tabs of a combo only moves the focus.
         if !shown.elementsEqual(controller.surfaceTree, by: ===) { controller.surfaceTree = shown }
-        if let view = tree.root?.leftmostLeaf() {
+        if let page = pages[surface.id] {
+            page.focus()
+        } else if let view = trees[surface.id]?.root?.leftmostLeaf() {
             DispatchQueue.main.async { Ghostty.moveFocus(to: view, from: old) }
             if let surface = view.surface, let raw = ghostty_surface_quicklook_font(surface) {
                 // A copy of the CTFont, which is ours to release.
@@ -289,6 +324,27 @@ final class SpaceTabs: ObservableObject {
         noteShown(surface)
     }
 
+    /// Starts watching the window's first responder, once it has a window. A page, or a view
+    /// inside a terminal, taking the focus puts its tab in front, as in `focused(_:)`, which
+    /// sees only terminals.
+    private func watchFocus(_ controller: TerminalController) {
+        guard focusWatch == nil, let window = controller.window else { return }
+        focusWatch = window.observe(\.firstResponder) { [weak self] window, _ in
+            DispatchQueue.main.async {
+                guard let self, let view = window.firstResponder as? NSView,
+                      let id = self.shownCombo.first(where: { id in
+                          self.pages[id].map { view.isDescendant(of: $0.view) }
+                              ?? self.trees[id]?.contains { view.isDescendant(of: $0) } == true
+                      }),
+                      id != self.active, let surface = SpaceStore.shared.surfaces[id] else { return }
+                self.noteShown(surface)
+            }
+        }
+    }
+
+    /// Whether the tab in front is a web tab.
+    var activeIsWeb: Bool { active.map { pages[$0] != nil } ?? false }
+
     /// Called when the tab in front is to close: the user closed it (File > Close Tab). If
     /// there is a tab in front this returns true, and otherwise false, so the window closes
     /// as usual. See `close(_:ask:)`.
@@ -321,6 +377,7 @@ final class SpaceTabs: ObservableObject {
         guard closing == active else {
             // The other tab of the combo in front: the tab in front fills the window.
             controller?.surfaceTree = active.flatMap { trees[$0] } ?? .init()
+            if controller?.surfaceTree.isEmpty == true { panes.removeAll { $0 == nil } }
             return
         }
         let next = tab(after: closing)
@@ -392,6 +449,29 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
+    /// Asks for an address and makes a web tab at the end of the selected Space: a browser
+    /// with `navigation`, else a tab that shows only that page. Then shows it.
+    func newWebTab(navigation: Bool) {
+        guard let selected, let space = SpaceStore.shared.spaces[selected] else { return NSSound.beep() }
+        let order = (tabs.compactMap(\.spec.order).max() ?? 0) + 10
+        askTitle(navigation ? "New Browser Tab" : "New Web Page Tab", nil,
+                 placeholder: "Address, or a file's path", button: "Open") { address in
+            guard let url = WebPage.url(address) else { return }
+            Task { @MainActor in
+                do {
+                    let surface: Surface = try await SpaceStore.shared.create(
+                        "surfaces", kind: "Surface", namespace: space.metadata.namespace ?? "default",
+                        metadata: ["generateName": "\(space.metadata.name)-"],
+                        spec: ["space": space.metadata.name, "order": order, "kind": "web",
+                               "web": ["url": url.absoluteString, "navigation": navigation]])
+                    if self.selected == space.id { self.show(surface) }
+                } catch {
+                    self.alert("Could not make a new tab", error)
+                }
+            }
+        }
+    }
+
     /// Asks for a title and makes a new Space in dennet, under `parent` or at the top
     /// level, after its siblings. Then shows it.
     func newSpace(parent: Space?) {
@@ -451,7 +531,8 @@ final class SpaceTabs: ObservableObject {
     /// Asks in a sheet for a title, starting from `current`, and passes it on trimmed if it
     /// changed.
     private func askTitle(
-        _ message: String, _ current: String?, placeholder: String = "Title", then done: @escaping (String) -> Void
+        _ message: String, _ current: String?, placeholder: String = "Title", button: String = "Rename",
+        then done: @escaping (String) -> Void
     ) {
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.stringValue = current ?? ""
@@ -459,7 +540,7 @@ final class SpaceTabs: ObservableObject {
         let alert = NSAlert()
         alert.messageText = message
         alert.accessoryView = field
-        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: button)
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
 
@@ -573,7 +654,7 @@ final class SpaceTabs: ObservableObject {
             }
             i += 1
         }
-        let surfaces = doomed.flatMap { $0.terminals(Array(store.surfaces.values)) }
+        let surfaces = doomed.flatMap { $0.tabs(Array(store.surfaces.values)) }
         let ids = seen
         let subspaces = doomed.count - 1
 
@@ -685,8 +766,10 @@ final class SpaceTabs: ObservableObject {
 
     /// Asks whether to close the tab, deleting its Surface and Den in dennet, which ends its
     /// den; or to detach, deleting only the Surface, so the den runs on without a tab. If
-    /// it was in front, the next tab is shown.
+    /// it was in front, the next tab is shown. A web tab has no den, and closes without
+    /// asking, as a browser's tab does.
     func closeTab(_ surface: Surface) {
+        guard surface.spec.web == nil else { return drop(surface, keepDen: true) }
         let alert = NSAlert()
         alert.messageText = "Close Tab?"
         alert.informativeText = "Close ends the den and the program running in it. "
@@ -698,30 +781,34 @@ final class SpaceTabs: ObservableObject {
 
         let close = { [weak self] (response: NSApplication.ModalResponse) in
             guard let self, response == .alertFirstButtonReturn || response == .alertSecondButtonReturn else { return }
-            let keepDen = response == .alertSecondButtonReturn
             alert.window.orderOut(nil)
-            Task { @MainActor in
-                do {
-                    try await self.delete(surface, keepDen: keepDen)
-                } catch {
-                    self.alert("Could not close the tab", error)
-                    return
-                }
-                guard self.active == surface.id else {
-                    if let selected = self.selected { self.recent[selected]?.removeAll { $0 == surface.id } }
-                    return
-                }
-                // dennet's watch may not have reported the delete yet; tab(after:) leaves
-                // the tab out either way.
-                let next = self.tab(after: surface.id)
-                self.active = nil
-                self.show(next)
-            }
+            self.drop(surface, keepDen: response == .alertSecondButtonReturn)
         }
         if let window = controller?.window {
             alert.beginSheetModal(for: window, completionHandler: close)
         } else {
             close(alert.runModal())
+        }
+    }
+
+    /// Deletes a tab (see `delete`) and, if it was in front, shows the next one.
+    private func drop(_ surface: Surface, keepDen: Bool) {
+        Task { @MainActor in
+            do {
+                try await self.delete(surface, keepDen: keepDen)
+            } catch {
+                self.alert("Could not close the tab", error)
+                return
+            }
+            guard self.active == surface.id else {
+                if let selected = self.selected { self.recent[selected]?.removeAll { $0 == surface.id } }
+                return
+            }
+            // dennet's watch may not have reported the delete yet; tab(after:) leaves
+            // the tab out either way.
+            let next = self.tab(after: surface.id)
+            self.active = nil
+            self.show(next)
         }
     }
 
@@ -785,7 +872,7 @@ final class SpaceTabs: ObservableObject {
     }
 
     /// Deletes a tab's Surface, and its Den in dennet unless `keepDen`, and drops its
-    /// terminal.
+    /// terminal or page.
     @MainActor
     private func delete(_ surface: Surface, keepDen: Bool = false) async throws {
         let store = SpaceStore.shared
@@ -798,6 +885,7 @@ final class SpaceTabs: ObservableObject {
             _ = try await store.request("DELETE", "\(root)/dens/\(den.metadata.name)")
         }
         trees[surface.id] = nil
+        pages[surface.id] = nil
     }
 
     /// Ghostty's goto_tab: a stop number from 1, or previous, next or last. A combo is one
