@@ -43,6 +43,10 @@ extension SpaceTabs {
         }
         if let tab {
             options.append(CommandOption(title: "Rename Tab", subtitle: tab.spec.title, leadingIcon: "pencil") { self.renameTab(tab) })
+            if stops.count > 1 {
+                options.append(CommandOption(title: "Swap Tabs", description: "Swap this tab with the one on its left, like Emacs's C-t; the first tab swaps with the second",
+                                             leadingIcon: "arrow.left.arrow.right") { self.swapTabs() })
+            }
             if combo(of: tab).count > 1 {
                 options.append(CommandOption(title: "Unglue Tab", description: "Show the two tabs of this combo as tabs of their own",
                                              leadingIcon: "rectangle") { self.unglue(tab.id) })
