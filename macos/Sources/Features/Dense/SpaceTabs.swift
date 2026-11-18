@@ -1066,6 +1066,14 @@ final class SpaceTabs: ObservableObject {
         return true
     }
 
+    /// Swap Tabs, like Emacs's transpose-chars (C-t): swaps the tab in front, with its combo,
+    /// with the one on its left. The first tab has none on its left, so it swaps with the
+    /// one on its right, as C-t at the end of a line swaps the two characters before it.
+    func swapTabs() {
+        guard let active, let from = stops.firstIndex(where: { $0.contains { $0.id == active } }) else { return }
+        move(active, to: from == 0 ? 1 : from - 1)
+    }
+
     /// Moves a tab, with its combo, to a place among the stops in the tab bar, by writing the
     /// new `order` of the Space's Surfaces to dennet. A glued tab comes right after the tab
     /// it is glued to, so that it stays there when unglued.
