@@ -326,7 +326,9 @@ private struct CommandTable: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    // Lazy: build only the rows in view. With a row per Space and per command,
+                    // an eager VStack took ~150ms to build 300 rows each time the palette opened.
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(options.enumerated()), id: \.1.id) { index, option in
                             CommandRow(
                                 option: option,
