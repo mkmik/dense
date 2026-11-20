@@ -962,11 +962,8 @@ final class SpaceTabs: ObservableObject {
         alert.messageText = "Close Tab?"
         alert.informativeText = "Close ends the den and the program running in it. "
             + "Detach removes the tab but leaves the den running, for den attach to reach later."
-        // A destructive button loses NSAlert's default Return key; give it back so
-        // Return closes the tab.
-        let closeButton = alert.addButton(withTitle: "Close")
-        closeButton.hasDestructiveAction = true
-        closeButton.keyEquivalent = "\r"
+        // A plain first button, as Ghostty's own close sheet: Return closes the tab.
+        alert.addButton(withTitle: "Close")
         alert.addButton(withTitle: "Detach")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
