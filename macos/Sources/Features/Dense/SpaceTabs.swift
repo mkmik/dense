@@ -962,7 +962,11 @@ final class SpaceTabs: ObservableObject {
         alert.messageText = "Close Tab?"
         alert.informativeText = "Close ends the den and the program running in it. "
             + "Detach removes the tab but leaves the den running, for den attach to reach later."
-        alert.addButton(withTitle: "Close").hasDestructiveAction = true
+        // A destructive button loses NSAlert's default Return key; give it back so
+        // Return closes the tab.
+        let closeButton = alert.addButton(withTitle: "Close")
+        closeButton.hasDestructiveAction = true
+        closeButton.keyEquivalent = "\r"
         alert.addButton(withTitle: "Detach")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
