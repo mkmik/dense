@@ -3026,6 +3026,26 @@ keybind: Keybinds = .{},
 /// Available since: 1.2.0
 @"command-palette-entry": RepeatableCommand = .{},
 
+/// A box of dense's sidebar, under the Space tree, as `name:lines`: its name
+/// and its height in lines of the terminal font. A box shows the selected
+/// Space's Surfaces whose `spec.placement` is its name; its size never
+/// depends on them, so switching Spaces never moves the Space tree.
+///
+/// Every name a Surface uses gets a box whether it is listed here or not.
+/// The listed ones come first, top to bottom in the order written, then the
+/// others by name, 8 lines tall. A listed name that no Surface uses shows
+/// nothing. Naming a box again changes its height and keeps its place. Lines
+/// can be left out (`sidebar-box = notes`), for 8. Dragging a box's top edge
+/// overrides its height; double-clicking the edge goes back to this one.
+///
+/// ```ini
+/// sidebar-box = details:8
+/// sidebar-box = notes:6
+/// ```
+///
+/// An empty value clears the list.
+@"sidebar-box": SidebarBoxes = .{},
+
 /// Sets the reporting format for OSC sequences that request color information.
 /// Ghostty currently supports OSC 10 (foreground), OSC 11 (background), and
 /// OSC 4 (256 color palette) queries, and by default the reported values
@@ -6199,6 +6219,143 @@ pub const Palette = struct {
         try testing.expect(p.mask.isSet(1));
         try testing.expect(p.mask.isSet(2));
         try testing.expect(!p.mask.isSet(3));
+    }
+};
+
+/// See sidebar-box
+pub const SidebarBoxes = struct {
+    const Self = @This();
+
+    /// The height of a box whose lines are not given.
+    pub const default_lines = 8;
+
+    boxes: std.ArrayListUnmanaged(Box) = .empty,
+
+    /// ghostty_config_sidebar_box_s
+    pub const Box = extern struct {
+        name: [*:0]const u8,
+        lines: u16,
+    };
+
+    /// ghostty_config_sidebar_box_list_s
+    pub const C = extern struct {
+        boxes: [*]const Box,
+        len: usize,
+    };
+
+    pub fn cval(self: *const Self) C {
+        return .{ .boxes = self.boxes.items.ptr, .len = self.boxes.items.len };
+    }
+
+    pub fn parseCLI(self: *Self, alloc: Allocator, input_: ?[]const u8) !void {
+        const input = std.mem.trim(u8, input_ orelse "", " \t");
+        if (input.len == 0) {
+            self.boxes.clearRetainingCapacity();
+            return;
+        }
+
+        const colon = std.mem.indexOfScalar(u8, input, ':');
+        const name = std.mem.trim(u8, input[0 .. colon orelse input.len], " \t");
+        const lines: u16 = if (colon) |i|
+            std.fmt.parseInt(u16, std.mem.trim(u8, input[i + 1 ..], " \t"), 10) catch
+                return error.InvalidValue
+        else
+            default_lines;
+        // A name dennet takes for spec.placement: a DNS label.
+        if (lines == 0 or name.len == 0 or name.len > 63) return error.InvalidValue;
+        for (name, 0..) |ch, i| switch (ch) {
+            'a'...'z', '0'...'9' => {},
+            '-' => if (i == 0 or i == name.len - 1) return error.InvalidValue,
+            else => return error.InvalidValue,
+        };
+
+        for (self.boxes.items) |*box| {
+            if (std.mem.eql(u8, std.mem.span(box.name), name)) {
+                box.lines = lines;
+                return;
+            }
+        }
+        try self.boxes.append(alloc, .{ .name = try alloc.dupeSentinel(u8, name, 0), .lines = lines });
+    }
+
+    /// Deep copy of the struct. Required by Config.
+    pub fn clone(self: *const Self, alloc: Allocator) Allocator.Error!Self {
+        var boxes = try std.ArrayListUnmanaged(Box).initCapacity(alloc, self.boxes.items.len);
+        for (self.boxes.items) |box| boxes.appendAssumeCapacity(.{
+            .name = try alloc.dupeSentinel(u8, std.mem.span(box.name), 0),
+            .lines = box.lines,
+        });
+        return .{ .boxes = boxes };
+    }
+
+    /// Compare if two of our value are equal. Required by Config.
+    pub fn equal(self: Self, other: Self) bool {
+        if (self.boxes.items.len != other.boxes.items.len) return false;
+        for (self.boxes.items, other.boxes.items) |a, b| {
+            if (a.lines != b.lines or !std.mem.eql(u8, std.mem.span(a.name), std.mem.span(b.name))) return false;
+        }
+        return true;
+    }
+
+    /// Used by Formatter
+    pub fn formatEntry(self: Self, formatter: formatterpkg.EntryFormatter) !void {
+        if (self.boxes.items.len == 0) {
+            try formatter.formatEntry(void, {});
+            return;
+        }
+        var buf: [80]u8 = undefined;
+        for (self.boxes.items) |box| {
+            // A name is at most 63 bytes, so it always fits.
+            const entry = std.fmt.bufPrint(&buf, "{s}:{d}", .{ std.mem.span(box.name), box.lines }) catch unreachable;
+            try formatter.formatEntry([]const u8, entry);
+        }
+    }
+
+    test "parseCLI" {
+        const testing = std.testing;
+        var arena = ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const alloc = arena.allocator();
+
+        var list: Self = .{};
+        try list.parseCLI(alloc, "details:12");
+        try list.parseCLI(alloc, " notes ");
+        try list.parseCLI(alloc, "details:4");
+        const cv = list.cval();
+        try testing.expectEqual(@as(usize, 2), cv.len);
+        try testing.expectEqualStrings("details", std.mem.span(cv.boxes[0].name));
+        try testing.expectEqual(@as(u16, 4), cv.boxes[0].lines);
+        try testing.expectEqualStrings("notes", std.mem.span(cv.boxes[1].name));
+        try testing.expectEqual(@as(u16, default_lines), cv.boxes[1].lines);
+
+        try testing.expectError(error.InvalidValue, list.parseCLI(alloc, "Details"));
+        try testing.expectError(error.InvalidValue, list.parseCLI(alloc, "-x:3"));
+        try testing.expectError(error.InvalidValue, list.parseCLI(alloc, "x:0"));
+        try testing.expectError(error.InvalidValue, list.parseCLI(alloc, "x:many"));
+        try testing.expectError(error.InvalidValue, list.parseCLI(alloc, "a_b"));
+        const long: [64]u8 = @splat('a');
+        try testing.expectError(error.InvalidValue, list.parseCLI(alloc, &long));
+        try list.parseCLI(alloc, long[0..63]);
+        try testing.expectEqual(@as(usize, 3), list.cval().len);
+
+        var copy = try list.clone(alloc);
+        try testing.expect(list.equal(copy));
+        try copy.parseCLI(alloc, "");
+        try testing.expectEqual(@as(usize, 0), copy.cval().len);
+        try testing.expect(!list.equal(copy));
+    }
+
+    test "formatConfig" {
+        const testing = std.testing;
+        var buf: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer buf.deinit();
+        var arena = ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+
+        var list: Self = .{};
+        try list.parseCLI(arena.allocator(), "details:8");
+        try list.formatEntry(formatterpkg.entryFormatter("sidebar-box", &buf.writer));
+        try testing.expectEqualSlices(u8, "sidebar-box = details:8\n", buf.written());
     }
 };
 

@@ -6,6 +6,21 @@ import SwiftUI
 struct ConfigTests {
     // MARK: - Boolean Properties
 
+    @Test func sidebarBoxesDefaultToNone() throws {
+        let config = try TemporaryConfig("")
+        #expect(config.sidebarBoxes.isEmpty)
+    }
+
+    @Test func sidebarBoxesInTheOrderWritten() throws {
+        let config = try TemporaryConfig("""
+            sidebar-box = details:12
+            sidebar-box = notes
+            sidebar-box = details:4
+            """)
+        #expect(config.sidebarBoxes == [SidebarBox(name: "details", lines: 4),
+                                        SidebarBox(name: "notes", lines: SidebarBox.defaultLines)])
+    }
+
     @Test func initialWindowDefaultsToTrue() throws {
         let config = try TemporaryConfig("")
         #expect(config.initialWindow == true)

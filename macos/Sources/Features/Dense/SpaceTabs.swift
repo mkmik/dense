@@ -165,8 +165,8 @@ final class SpaceTabs: ObservableObject {
                 if web != page.spec { page.load(web) }
             }
             for id in self.sidebarTerminals.keys where surfaces[id]?.inSidebar != true { self.sidebarTerminals[id] = nil }
-            // Tabs moved to the sidebar: the one in front gives way to the next, and their
-            // terminals and pages go, as the sidebar makes its own.
+            // Tabs moved to a box: the one in front gives way to the next, and their
+            // terminals and pages go, as the box makes its own.
             if let id = self.active, surfaces[id]?.inSidebar == true {
                 let next = self.tab(after: id)
                 self.active = nil
@@ -1153,19 +1153,28 @@ final class SpaceTabs: ObservableObject {
         return stops[at - 1][0]
     }
 
-    /// Moves a tab to its Space's part of the sidebar, unglued, or a sidebar section to the
-    /// end of the tabs, and shows it if dennet has said so by then.
-    func place(_ surface: Surface, inSidebar: Bool) {
-        let spec: [String: Any] = inSidebar
-            ? ["placement": "sidebar", "beside": NSNull()]
-            : ["placement": NSNull(), "order": (tabs.compactMap(\.spec.order).max() ?? 0) + 10]
+    /// Moves a Surface to the sidebar's box `box`, unglued, or with nil to the end of the
+    /// tabs, and shows it if dennet has said so by then.
+    func place(_ surface: Surface, in box: String?) {
+        let spec: [String: Any] = box.map { ["placement": $0, "beside": NSNull()] }
+            ?? ["placement": NSNull(), "order": (tabs.compactMap(\.spec.order).max() ?? 0) + 10]
         Task { @MainActor in
             guard await self.patchSpec("surfaces", surface.metadata, spec, failure: "Could not move it") else { return }
-            if !inSidebar, let moved = self.tabs.first(where: { $0.id == surface.id }) { self.show(moved) }
+            if box == nil, let moved = self.tabs.first(where: { $0.id == surface.id }) { self.show(moved) }
         }
     }
 
-    /// The view a sidebar section shows for a Surface of kind web or terminal: its page, or
+    /// Asks for the name of a box and moves a Surface there. A name no Surface uses yet
+    /// makes a new box.
+    func moveToNewBox(_ surface: Surface) {
+        askTitle("Move to a New Box", nil, placeholder: "Name, such as details", button: "Move") { typed in
+            let name = SidebarBox.name(typed: typed)
+            guard !name.isEmpty else { return }
+            self.place(surface, in: name)
+        }
+    }
+
+    /// The view a box shows for a Surface of kind web or terminal: its page, or
     /// its terminal while its den runs, made once and kept while it is in the sidebar. nil
     /// while there is nothing to show. A terminal there is sized to the sidebar, and so
     /// is its den: it should not also be a tab's.

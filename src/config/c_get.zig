@@ -238,3 +238,25 @@ test "c_get: split-preserve-zoom" {
     try testing.expect(get(&c, .@"split-preserve-zoom", @ptrCast(&bits)));
     try testing.expectEqual(@as(c_uint, 1), bits);
 }
+
+test "c_get: sidebar-box" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+
+    var c = try Config.default(alloc);
+    defer c.deinit();
+
+    var list: Config.SidebarBoxes.C = undefined;
+    try testing.expect(get(&c, .@"sidebar-box", @ptrCast(&list)));
+    try testing.expectEqual(@as(usize, 0), list.len);
+
+    const arena = c._arena.?.allocator();
+    try c.@"sidebar-box".parseCLI(arena, "details:12");
+    try c.@"sidebar-box".parseCLI(arena, "notes");
+    try testing.expect(get(&c, .@"sidebar-box", @ptrCast(&list)));
+    try testing.expectEqual(@as(usize, 2), list.len);
+    try testing.expectEqualStrings("details", std.mem.span(list.boxes[0].name));
+    try testing.expectEqual(@as(u16, 12), list.boxes[0].lines);
+    try testing.expectEqualStrings("notes", std.mem.span(list.boxes[1].name));
+    try testing.expectEqual(@as(u16, Config.SidebarBoxes.default_lines), list.boxes[1].lines);
+}

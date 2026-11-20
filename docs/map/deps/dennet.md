@@ -39,9 +39,9 @@ note = "t8y:/api/extension and t8y:/api/surface#ui in dennet's map"
 
 [[feature]]
 id = "placement"
-title = "Surface spec.placement: a tab, or sidebar"
+title = "Surface spec.placement: a tab, or the name of a box"
 status = "done"
-note = "t8y:/api/surface#sidebar in dennet's map"
+note = "t8y:/api/surface#box in dennet's map"
 +++
 
 Only what dense needs from dennet. dennet has its own map.

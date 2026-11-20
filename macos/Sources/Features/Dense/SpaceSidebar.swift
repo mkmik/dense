@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The sidebar on the left of the window: the Space tree from dennet, in one section per
-/// machine. This machine's Spaces come first, then each Host's, each under the machine's
-/// name and a line. Clicking a Space shows its tabs. A Space can be dragged up or down
+/// machine, and under it the boxes (see `SidebarBoxes`). This machine's Spaces come first,
+/// then each Host's, each under the machine's name and a line. Clicking a Space shows its tabs. A Space can be dragged up or down
 /// among its siblings, taking its subspaces along; a drag never changes its parent.
 ///
 /// It is set in the terminals' font, one text line per row as in a terminal. View > Show
@@ -19,6 +19,13 @@ struct SpaceSidebar: View {
     let look: TerminalLook
     private var font: NSFont { look.font }
 
+    /// The boxes under the Space tree, and where Move to Box can send a Surface.
+    let boxes: [SidebarBox]
+    let boxChoices: [String]
+
+    /// The rows of the Space tree a short window keeps, making the boxes shorter.
+    private static let minRows: CGFloat = 6
+
     @AppStorage(SidebarMenu.treeLinesKey) private var treeLines = false
 
     /// The Space being dragged, and how far it has moved.
@@ -33,11 +40,9 @@ struct SpaceSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            spaces
-            // The selected Space's Surfaces placed in the sidebar.
-            if let space = tabs.selected.flatMap({ store.spaces[$0] }) {
-                SidebarSections(space: space, tabs: tabs)
-            }
+            spaces.frame(minHeight: Self.minRows * cell.height)
+            SidebarBoxes(space: tabs.selected.flatMap { store.spaces[$0] }, boxes: boxes, choices: boxChoices,
+                         cell: cell, tabs: tabs)
             filterBar
         }
         .font(Font(font))

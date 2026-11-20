@@ -50,7 +50,8 @@ struct SpaceWindowView<Terminal: View>: View {
                     }
                     .padding(.horizontal, 8)
                     .frame(height: Self.titlebarHeight)
-                    SpaceSidebar(tabs: tabs, selection: ghostty.config.backgroundColor, look: terminalLook)
+                    SpaceSidebar(tabs: tabs, selection: ghostty.config.backgroundColor, look: terminalLook,
+                                 boxes: boxes, boxChoices: boxChoices)
                 }
                 .frame(width: sidebarWidth)
                 .frame(maxHeight: .infinity, alignment: .top)
@@ -66,6 +67,7 @@ struct SpaceWindowView<Terminal: View>: View {
                     // the mouse says no. The tabs say no, so they can be dragged instead.
                     NotWindowDraggable(content: SurfaceTabBar(
                         tabs: tabs,
+                        boxChoices: boxChoices,
                         stops: tabs.selected.flatMap { store.spaces[$0] }
                             .map { Space.combos($0.tabs(Array(store.surfaces.values))) }))
                     Spacer(minLength: 0)
@@ -188,6 +190,13 @@ struct SpaceWindowView<Terminal: View>: View {
     /// How the terminals draw text.
     private var terminalLook: TerminalLook { TerminalLook(config: ghostty.config, font: tabs.font) }
 
+    /// The sidebar's boxes: one for each name a Surface's placement uses, those listed with
+    /// sidebar-box first.
+    private var boxes: [SidebarBox] { SidebarBox.shown(store.surfaces.values, listed: ghostty.config.sidebarBoxes) }
+
+    /// Where Move to Box can send a Surface.
+    private var boxChoices: [String] { SidebarBox.choices(shown: boxes, listed: ghostty.config.sidebarBoxes) }
+
     /// What a Space shows when it has no terminal to show.
     private var placeholder: String {
         // Blank while the Space is not there, as when its Host has not answered yet.
@@ -228,6 +237,8 @@ private struct NotWindowDraggable<Content: View>: NSViewRepresentable {
 /// beside it, and a tab of a combo dropped away from it is unglued.
 private struct SurfaceTabBar: View {
     @ObservedObject var tabs: SpaceTabs
+    /// Where Move to Box can send a tab.
+    let boxChoices: [String]
     let stops: [[Surface]]?
     /// The tab being dragged, how far it has moved, where the mouse is, and whether ⌘ is down.
     @State private var drag: Drag?
@@ -306,7 +317,7 @@ private struct SurfaceTabBar: View {
         })
         .contextMenu {
             Button("Rename Tab…") { tabs.renameTab(surface) }
-            Button("Move to Sidebar") { tabs.place(surface, inSidebar: true) }
+            MoveToBoxMenu(surface: surface, choices: boxChoices, tabs: tabs)
             if stop.count > 1 {
                 Button("Unglue Tab") { tabs.unglue(surface.id) }
             } else if let left = tabs.glueTarget(left: surface.id) {
