@@ -50,7 +50,8 @@ struct TerminalCommandPaletteView: View {
                             isPresented: $isPresented,
                             backgroundColor: ghosttyConfig.backgroundColor,
                             options: spacesOnly ? spaceOptions : commandOptions,
-                            placeholder: spacesOnly ? "Open a Space…" : "Execute a command…"
+                            placeholder: spacesOnly ? "Open a Space…" : "Execute a command…",
+                            selectsFirst: spacesOnly
                         )
                         .zIndex(1) // Ensure it's on top
 

@@ -66,6 +66,8 @@ struct CommandPaletteView: View {
     var backgroundColor: Color = Color(nsColor: .windowBackgroundColor)
     var options: [CommandOption]
     var placeholder = "Execute a command…"
+    /// Opens with the first option selected, so Return alone runs it.
+    var selectsFirst = false
     @State private var rawQuery = ""
     @State private var selectedIndex: UInt?
     @State private var hoveredOptionID: UUID?
@@ -138,7 +140,7 @@ struct CommandPaletteView: View {
                     if selectedIndex == nil {
                         selectedIndex = 0
                     }
-                } else {
+                } else if !selectsFirst {
                     if let selectedIndex, selectedIndex == 0 {
                         self.selectedIndex = nil
                     }
@@ -175,6 +177,7 @@ struct CommandPaletteView: View {
         .shadow(radius: 32, x: 0, y: 12)
         .padding()
         .environment(\.colorScheme, scheme)
+        .onAppear { if selectsFirst { selectedIndex = 0 } }
         .onChange(of: isPresented) { newValue in
             if !newValue {
                 // This is optional, since most of the time
