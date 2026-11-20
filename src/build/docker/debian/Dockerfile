@@ -1,4 +1,4 @@
-ARG DISTRO_VERSION="13"
+ARG DISTRO_VERSION="13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6"
 FROM docker.io/library/debian:${DISTRO_VERSION}
 
 # Install Dependencies
