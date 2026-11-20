@@ -43,7 +43,7 @@ final class NewBuild: ObservableObject {
     }
 }
 
-/// A blue pill in the window's corner, like Ghostty's update pill, while a newer build
+/// A blue pill at the right end of the titlebar, like Ghostty's update pill, while a newer build
 /// is on disk. Clicking it restarts dense.
 struct NewBuildPill: View {
     @ObservedObject var build: NewBuild = .shared
@@ -63,7 +63,7 @@ struct NewBuildPill: View {
             }
             .buttonStyle(.plain)
             .help("A newer build of dense is on disk. Click to restart into it.")
-            .padding(9)
+            .padding(.trailing, 9)
         }
     }
 }
