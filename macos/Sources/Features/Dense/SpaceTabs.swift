@@ -17,7 +17,7 @@ import GhosttyKit
 ///
 /// A web Surface's tab shows a `WebPage` instead, beside the terminal area or in its place
 /// (`panes`). It too is kept while out of view, and loads its page again when its Surface
-/// changes it.
+/// changes it. A ui Surface's tab shows its Extension's A2UI surface (`UIPage`) the same way.
 ///
 /// dense has no macOS window tabs. Ghostty's tab commands (new tab, go to tab, move tab,
 /// close tab), from key bindings, menus, AppleScript, Shortcuts or Services, act on these
@@ -50,16 +50,21 @@ final class SpaceTabs: ObservableObject {
     /// is one terminal.
     private var trees: [String: SplitTree<Ghostty.SurfaceView>] = [:]
 
-    /// Each web tab's page, by Surface id.
-    private var pages: [String: WebPage] = [:]
+    /// Each web or ui tab's page, by Surface id.
+    private var pages: [String: any TabPage] = [:]
 
     /// The tabs in the window: the tab in front and, if it is in a combo, the other one, left
     /// first. The other one's terminal may be missing, while its den doesn't run.
     private var shownCombo: [String] = []
 
-    /// What the window shows, left first: a web tab's page, or nil for the terminal area,
-    /// which shows the terminals of the tabs in `shownCombo`. Empty with no tab shown.
-    @Published private(set) var panes: [WebPage?] = []
+    /// What the window shows, left first: a web or ui tab's page, or nil for the terminal
+    /// area, which shows the terminals of the tabs in `shownCombo`. Empty with no tab shown.
+    @Published private(set) var panes: [(any TabPage)?] = []
+
+    /// The pages and terminals of Surfaces in the sidebar (see `sidebarView`), kept apart
+    /// from the tabs': a terminal in the window's split tree can't also be in the sidebar.
+    private var sidebarPages: [String: WebPage] = [:]
+    private var sidebarTerminals: [String: Ghostty.SurfaceView] = [:]
 
     /// Watches which view has the focus, so clicking into a web page in a combo puts its tab
     /// in front, and clicking back into the terminal puts the terminal's.
@@ -152,9 +157,33 @@ final class SpaceTabs: ObservableObject {
         // web tab whose page changed loads it again; one whose Surface has gone drops it.
         surfaceChanges = store.$surfaces.receive(on: DispatchQueue.main).sink { [weak self] surfaces in
             guard let self else { return }
+            for (id, page) in self.sidebarPages {
+                guard let surface = surfaces[id], surface.inSidebar, let web = surface.spec.web else {
+                    self.sidebarPages[id] = nil
+                    continue
+                }
+                if web != page.spec { page.load(web) }
+            }
+            for id in self.sidebarTerminals.keys where surfaces[id]?.inSidebar != true { self.sidebarTerminals[id] = nil }
+            // Tabs moved to the sidebar: the one in front gives way to the next, and their
+            // terminals and pages go, as the sidebar makes its own.
+            if let id = self.active, surfaces[id]?.inSidebar == true {
+                let next = self.tab(after: id)
+                self.active = nil
+                self.show(next)
+            }
+            for id in self.trees.keys where surfaces[id]?.inSidebar == true {
+                // The watch first: den attach exiting here must not close the tab.
+                self.exits[id] = nil
+                self.trees[id] = nil
+            }
+            for id in self.pages.keys where surfaces[id]?.inSidebar == true { self.pages[id] = nil }
             for (id, page) in self.pages {
-                if let web = surfaces[id]?.spec.web {
+                let spec = surfaces[id]?.spec
+                if let web = spec?.web, let page = page as? WebPage {
                     if web != page.spec { page.load(web) }
+                } else if spec?.ui != nil, page is UIPage {
+                    // Its Extension keeps it up to date.
                 } else if !self.shownCombo.contains(id) {
                     self.pages[id] = nil
                 }
@@ -203,11 +232,16 @@ final class SpaceTabs: ObservableObject {
         return true
     }
 
-    /// Shows a tab by its Surface id, in whichever Space it is. False if dennet has no such tab.
-    private func show(surfaceID id: String) -> Bool {
+    /// Shows a tab by its Surface id, in whichever Space it is; for a Surface in the sidebar,
+    /// its Space. False if dennet has no such Surface.
+    func show(surfaceID id: String) -> Bool {
         let store = SpaceStore.shared
         guard let surface = store.surfaces[id],
               let space = store.spaces[objectID(surface.metadata.namespace, surface.spec.space)] else { return false }
+        if surface.inSidebar {
+            if selected != space.id { select(space) }
+            return true
+        }
         selected = space.id
         show(surface)
         return true
@@ -275,6 +309,10 @@ final class SpaceTabs: ObservableObject {
                     page.change = { [weak self] in self?.changePage(id) }
                     pages[tab.id] = page
                 }
+                continue
+            }
+            if tab.spec.ui != nil {
+                if pages[tab.id] == nil { pages[tab.id] = UIPage(tab) }
                 continue
             }
             trees[tab.id] = trees[tab.id].flatMap { $0.allSatisfy(\.processExited) ? nil : $0 }
@@ -397,7 +435,7 @@ final class SpaceTabs: ObservableObject {
             DispatchQueue.main.async {
                 guard let self, let view = window.firstResponder as? NSView,
                       let id = self.shownCombo.first(where: { id in
-                          self.pages[id].map { view.isDescendant(of: $0.view) }
+                          self.pages[id].map { view.isDescendant(of: $0.root) }
                               ?? self.trees[id]?.contains { view.isDescendant(of: $0) } == true
                       }),
                       id != self.active, let surface = SpaceStore.shared.surfaces[id] else { return }
@@ -406,8 +444,8 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
-    /// Whether the tab in front is a web tab.
-    var activeIsWeb: Bool { active.map { pages[$0] != nil } ?? false }
+    /// Whether the tab in front shows a page (web or ui) rather than a terminal.
+    var activeIsPage: Bool { active.map { pages[$0] != nil } ?? false }
 
     /// Called when the tab in front is to close: the user closed it (File > Close Tab). If
     /// there is a tab in front this returns true, and otherwise false, so the window closes
@@ -804,7 +842,7 @@ final class SpaceTabs: ObservableObject {
             }
             i += 1
         }
-        let surfaces = doomed.flatMap { $0.tabs(Array(store.surfaces.values)) }
+        let surfaces = doomed.flatMap { $0.shown(Array(store.surfaces.values)) }
         let ids = seen
         let subspaces = doomed.count - 1
 
@@ -916,10 +954,10 @@ final class SpaceTabs: ObservableObject {
 
     /// Asks whether to close the tab, deleting its Surface and Den in dennet, which ends its
     /// den; or to detach, deleting only the Surface, so the den runs on without a tab. If
-    /// it was in front, the next tab is shown. A web tab has no den, and closes without
-    /// asking, as a browser's tab does.
+    /// it was in front, the next tab is shown. A web or ui tab has no den, and closes
+    /// without asking, as a browser's tab does.
     func closeTab(_ surface: Surface) {
-        guard surface.spec.web == nil else { return drop(surface, keepDen: true) }
+        guard surface.spec.terminal != nil else { return drop(surface, keepDen: true) }
         let alert = NSAlert()
         alert.messageText = "Close Tab?"
         alert.informativeText = "Close ends the den and the program running in it. "
@@ -1114,6 +1152,37 @@ final class SpaceTabs: ObservableObject {
         return stops[at - 1][0]
     }
 
+    /// Moves a tab to its Space's part of the sidebar, unglued, or a sidebar section to the
+    /// end of the tabs, and shows it if dennet has said so by then.
+    func place(_ surface: Surface, inSidebar: Bool) {
+        let spec: [String: Any] = inSidebar
+            ? ["placement": "sidebar", "beside": NSNull()]
+            : ["placement": NSNull(), "order": (tabs.compactMap(\.spec.order).max() ?? 0) + 10]
+        Task { @MainActor in
+            guard await self.patchSpec("surfaces", surface.metadata, spec, failure: "Could not move it") else { return }
+            if !inSidebar, let moved = self.tabs.first(where: { $0.id == surface.id }) { self.show(moved) }
+        }
+    }
+
+    /// The view a sidebar section shows for a Surface of kind web or terminal: its page, or
+    /// its terminal while its den runs, made once and kept while it is in the sidebar. nil
+    /// while there is nothing to show. A terminal there is sized to the sidebar, and so
+    /// is its den: it should not also be a tab's.
+    func sidebarView(_ surface: Surface) -> NSView? {
+        if let web = surface.spec.web {
+            let page = sidebarPages[surface.id] ?? WebPage(web, namespace: surface.metadata.namespace ?? "default")
+            sidebarPages[surface.id] = page
+            return page.root
+        }
+        guard surface.spec.terminal != nil, let controller else { return nil }
+        if let view = sidebarTerminals[surface.id], !view.processExited { return view }
+        sidebarTerminals[surface.id] = nil
+        guard SpaceStore.shared.den(of: surface)?.running == true else { return nil }
+        let view = makeView(surface, controller: controller, inSidebar: true)
+        sidebarTerminals[surface.id] = view
+        return view
+    }
+
     /// Unglues a combo, either of whose tabs is `id`: each becomes a tab of its own. `id`
     /// goes to stop `index` among the others, or else stays next to the other tab, on its
     /// own side.
@@ -1181,11 +1250,11 @@ final class SpaceTabs: ObservableObject {
         return nil
     }
 
-    private func makeView(_ surface: Surface, controller: TerminalController) -> Ghostty.SurfaceView {
+    private func makeView(_ surface: Surface, controller: TerminalController, inSidebar: Bool = false) -> Ghostty.SurfaceView {
         var config = Ghostty.SurfaceConfiguration()
         config.command = Self.attachCommand(
             namespace: surface.metadata.namespace ?? "default", den: surface.spec.terminal?.den ?? "",
-            size: tabSize(controller))
+            size: inSidebar ? nil : tabSize(controller))
         config.initialInput = pendingInput.removeValue(forKey: surface.id)
         guard let app = controller.ghostty.app else { preconditionFailure("app must be loaded") }
         let view = Ghostty.SurfaceView(app, baseConfig: config)
@@ -1193,7 +1262,9 @@ final class SpaceTabs: ObservableObject {
         // until a key is pressed. den attach exiting means the den stopped or let go, so the
         // terminal closes at once and the tab shows why. A quick or failed exit (level
         // error) stays, so its error can be read. Ghostty reports an exit only while the
-        // terminal is in a window; one exited out of sight is dropped when shown.
+        // terminal is in a window; one exited out of sight is dropped when shown. One in the
+        // sidebar is not in the window's split tree: `sidebarView` drops it once exited.
+        if inSidebar { return view }
         exits[surface.id] = view.$childExitedMessage
             .compactMap { $0 }
             .filter { $0.level == .success }

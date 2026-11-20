@@ -105,10 +105,12 @@ struct SpaceTreeTests {
         #expect(rows.map(\.space.metadata.name) == ["a"])
     }
 
-    @Test func tabsAreTheSpacesTerminalAndWebSurfacesInOrder() {
-        func surface(_ name: String, space: String, order: Int32, den: String? = "d", web: Surface.Web? = nil) -> Surface {
+    @Test func tabsAndSidebarSectionsAreTheSpacesSurfacesInOrder() {
+        func surface(_ name: String, space: String, order: Int32, placement: String? = nil, den: String? = "d",
+                     web: Surface.Web? = nil, ui: Surface.UI? = nil) -> Surface {
             Surface(metadata: .init(name: name, namespace: "default"),
-                    spec: .init(space: space, order: order, terminal: den.map { .init(den: $0) }, web: web))
+                    spec: .init(space: space, order: order, placement: placement, terminal: den.map { .init(den: $0) },
+                                web: web, ui: ui))
         }
         let surfaces = [
             surface("second", space: "a", order: 2),
@@ -116,8 +118,13 @@ struct SpaceTreeTests {
             surface("other", space: "b", order: 0),
             surface("page", space: "a", order: 3, den: nil, web: .init(html: "<p>")),
             surface("notes", space: "a", order: 0, den: nil),
+            surface("status", space: "a", order: 5, placement: "sidebar", den: nil, ui: .init(extension: "ccwt")),
+            surface("log", space: "a", order: 1, placement: "sidebar"),
+            surface("panel", space: "a", order: 4, den: nil, ui: .init(extension: "ccwt")),
         ]
-        #expect(space("a").tabs(surfaces).map(\.metadata.name) == ["first", "second", "page"])
+        #expect(space("a").tabs(surfaces).map(\.metadata.name) == ["first", "second", "page", "panel"])
+        #expect(space("a").sidebar(surfaces).map(\.metadata.name) == ["log", "status"])
+        #expect(surfaces.last?.uiExtension == "default/ccwt")
     }
 
     @Test func combosGlueATabBesideAnotherThatIsNotGlued() {

@@ -70,18 +70,27 @@ pub fn init(
         step.addArgs(&.{
             "/bin/sh",
             "-c",
-            "exec \"$@\" DENSE_BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"",
+            // SYMROOT keeps the app in build/<configuration>/, where -target put it.
+            "exec \"$@\" DENSE_BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" SYMROOT=\"$PWD/build\"",
             "sh",
             "xcodebuild",
-            "-target",
+            // dense: a scheme, not -target, so that Swift packages that need other
+            // packages (a2ui needs swift-collections) have those built first.
+            "-scheme",
             "Ghostty",
             "-configuration",
             xc_config,
+            // dense: the a2ui package builds with a SwiftPM build tool plugin and
+            // a macro package, which xcodebuild otherwise asks to trust first.
+            "-skipMacroValidation",
+            "-skipPackagePluginValidation",
         });
 
-        // If we have a specific architecture, we need to pass it
-        // to xcodebuild.
-        if (xc_arch) |arch| step.addArgs(&.{ "-arch", arch });
+        // dense: a scheme build needs a destination. The generic one builds every
+        // architecture, as -target did; ARCHS narrows it, since xcodebuild refuses -arch
+        // with a destination, and one for this Mac alone still builds them all.
+        step.addArgs(&.{ "-destination", "generic/platform=macOS" });
+        if (xc_arch) |arch| step.addArg(b.fmt("ARCHS={s}", .{arch}));
 
         // We need the xcframework
         deps.xcframework.addStepDependencies(&step.step);
@@ -114,6 +123,8 @@ pub fn init(
             "Ghostty",
             "-skip-testing",
             "GhosttyUITests",
+            "-skipMacroValidation",
+            "-skipPackagePluginValidation",
         });
         if (xc_arch) |arch| step.addArgs(&.{ "-arch", arch });
 
