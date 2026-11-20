@@ -61,7 +61,8 @@ struct Surface: DennetObject {
         var beside: String?
         /// How much of the combo's width this tab takes when glued, in percent; nil is half.
         var width: Int32?
-        /// Where it goes: nil for a tab, or "sidebar" for a section of its Space's sidebar.
+        /// Where it goes: nil or empty for a tab, else the name of a box of the sidebar
+        /// (see `SidebarBox`).
         var placement: String?
         var kind: String?
         var terminal: Terminal?
@@ -98,8 +99,14 @@ struct Surface: DennetObject {
     /// The id of the Extension that draws this Surface, for one of kind ui.
     var uiExtension: String? { spec.ui.map { objectID(metadata.namespace, $0.extension) } }
 
-    /// Whether it is a section of its Space's sidebar rather than a tab.
-    var inSidebar: Bool { spec.placement == "sidebar" }
+    /// The box of the sidebar it goes in, or nil for a tab.
+    var box: String? { spec.placement.flatMap { $0.isEmpty ? nil : $0 } }
+
+    /// Whether it goes in a box of the sidebar rather than in the tabs.
+    var inSidebar: Bool { box != nil }
+
+    /// Whether it is of a kind dense shows: terminal, web or ui.
+    var drawable: Bool { spec.terminal != nil || spec.web != nil || spec.ui != nil }
 }
 
 /// A program in a tab asking dense to show a Space, or a tab of one: the
@@ -340,19 +347,18 @@ extension Space {
 
     /// This space's tabs, in order: its `shown` Surfaces not in the sidebar.
     func tabs(_ surfaces: [Surface]) -> [Surface] {
-        shown(surfaces).filter { ($0.spec.placement ?? "").isEmpty }
+        shown(surfaces).filter { $0.box == nil }
     }
 
-    /// This space's sections of the sidebar, in order.
-    func sidebar(_ surfaces: [Surface]) -> [Surface] { shown(surfaces).filter(\.inSidebar) }
+    /// This space's Surfaces in the sidebar's box `box`, in order.
+    func surfaces(_ surfaces: [Surface], in box: String) -> [Surface] { shown(surfaces).filter { $0.box == box } }
 
     /// This space's Surfaces of a kind dense shows (terminal, web and ui), wherever they go,
     /// sorted by order, then name.
     func shown(_ surfaces: [Surface]) -> [Surface] {
         surfaces
             .filter {
-                $0.metadata.namespace == metadata.namespace && $0.spec.space == metadata.name
-                    && ($0.spec.terminal != nil || $0.spec.web != nil || $0.spec.ui != nil)
+                $0.metadata.namespace == metadata.namespace && $0.spec.space == metadata.name && $0.drawable
             }
             .sorted { ($0.spec.order ?? 0, $0.metadata.name) < ($1.spec.order ?? 0, $1.metadata.name) }
     }

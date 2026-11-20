@@ -105,26 +105,63 @@ struct SpaceTreeTests {
         #expect(rows.map(\.space.metadata.name) == ["a"])
     }
 
-    @Test func tabsAndSidebarSectionsAreTheSpacesSurfacesInOrder() {
-        func surface(_ name: String, space: String, order: Int32, placement: String? = nil, den: String? = "d",
-                     web: Surface.Web? = nil, ui: Surface.UI? = nil) -> Surface {
-            Surface(metadata: .init(name: name, namespace: "default"),
-                    spec: .init(space: space, order: order, placement: placement, terminal: den.map { .init(den: $0) },
-                                web: web, ui: ui))
-        }
+    private func surface(_ name: String, space: String, order: Int32 = 0, placement: String? = nil, den: String? = "d",
+                         web: Surface.Web? = nil, ui: Surface.UI? = nil) -> Surface {
+        Surface(metadata: .init(name: name, namespace: "default"),
+                spec: .init(space: space, order: order, placement: placement, terminal: den.map { .init(den: $0) },
+                            web: web, ui: ui))
+    }
+
+    @Test func tabsAndBoxesAreTheSpacesSurfacesInOrder() {
         let surfaces = [
             surface("second", space: "a", order: 2),
             surface("first", space: "a", order: 1),
             surface("other", space: "b", order: 0),
             surface("page", space: "a", order: 3, den: nil, web: .init(html: "<p>")),
             surface("notes", space: "a", order: 0, den: nil),
-            surface("status", space: "a", order: 5, placement: "sidebar", den: nil, ui: .init(extension: "ccwt")),
-            surface("log", space: "a", order: 1, placement: "sidebar"),
-            surface("panel", space: "a", order: 4, den: nil, ui: .init(extension: "ccwt")),
+            surface("status", space: "a", order: 5, placement: "details", den: nil, ui: .init(extension: "dowt")),
+            surface("log", space: "a", order: 1, placement: "details"),
+            surface("scratch", space: "a", order: 2, placement: "notes"),
+            surface("empty", space: "a", order: 6, placement: ""),
+            surface("panel", space: "a", order: 4, den: nil, ui: .init(extension: "dowt")),
         ]
-        #expect(space("a").tabs(surfaces).map(\.metadata.name) == ["first", "second", "page", "panel"])
-        #expect(space("a").sidebar(surfaces).map(\.metadata.name) == ["log", "status"])
-        #expect(surfaces.last?.uiExtension == "default/ccwt")
+        #expect(space("a").tabs(surfaces).map(\.metadata.name) == ["first", "second", "page", "panel", "empty"])
+        #expect(space("a").surfaces(surfaces, in: "details").map(\.metadata.name) == ["log", "status"])
+        #expect(space("b").surfaces(surfaces, in: "details").isEmpty)
+        #expect(surfaces.last?.uiExtension == "default/dowt")
+    }
+
+    @Test func boxesAreEveryNameInUseListedOnesFirst() {
+        // The same boxes whichever Space is selected: "notes" is only b's, "details" only a's.
+        let surfaces = [
+            surface("panel", space: "a", placement: "details", den: nil, ui: .init(extension: "dowt")),
+            surface("scratch", space: "b", placement: "notes"),
+            surface("log", space: "b", placement: "logs"),
+            surface("tab", space: "a"),
+            // Of no kind dense shows: no box for it.
+            surface("odd", space: "a", placement: "odd", den: nil),
+        ]
+        let listed = [SidebarBox(name: "notes", lines: 4), SidebarBox(name: "unused", lines: 3),
+                      SidebarBox(name: "details", lines: 12)]
+        let boxes = SidebarBox.shown(surfaces, listed: listed)
+        #expect(boxes == [SidebarBox(name: "notes", lines: 4), SidebarBox(name: "details", lines: 12),
+                          SidebarBox(name: "logs", lines: SidebarBox.defaultLines)])
+        #expect(SidebarBox.shown([surface("tab", space: "a")], listed: listed).isEmpty)
+        #expect(SidebarBox.choices(shown: boxes, listed: listed) == ["notes", "details", "logs", "unused"])
+    }
+
+    @Test func aBoxNameMeansTheSameBoxOnEveryMachine() {
+        // A Host's Spaces are in the Host's namespace; its "details" is this machine's.
+        var remote = surface("panel", space: "a", placement: "details", den: nil, ui: .init(extension: "dowt"))
+        remote.metadata.namespace = "devbox"
+        let boxes = SidebarBox.shown([surface("log", space: "a", placement: "details"), remote], listed: [])
+        #expect(boxes == [SidebarBox(name: "details", lines: SidebarBox.defaultLines)])
+    }
+
+    @Test func aTypedBoxNameIsLowercasedWithDashesForSpaces() {
+        #expect(SidebarBox.name(typed: "Details") == "details")
+        #expect(SidebarBox.name(typed: "  Review  Status ") == "review-status")
+        #expect(SidebarBox.name(typed: "   ").isEmpty)
     }
 
     @Test func combosGlueATabBesideAnotherThatIsNotGlued() {

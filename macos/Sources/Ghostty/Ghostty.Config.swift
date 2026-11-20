@@ -721,6 +721,17 @@ extension Ghostty {
             return buffer.map { Ghostty.Command(cValue: $0) }
         }
 
+        /// dense's sidebar boxes listed with sidebar-box, top to bottom.
+        var sidebarBoxes: [SidebarBox] {
+            guard let config = self.config else { return [] }
+            var v: ghostty_config_sidebar_box_list_s = .init()
+            let key = "sidebar-box"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))), v.len > 0 else { return [] }
+            return UnsafeBufferPointer(start: v.boxes, count: v.len).map {
+                SidebarBox(name: String(cString: $0.name), lines: Int($0.lines))
+            }
+        }
+
         var progressStyle: Bool {
             guard let config = self.config else { return true }
             var v = true

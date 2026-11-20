@@ -556,6 +556,18 @@ typedef struct {
   size_t len;
 } ghostty_config_command_list_s;
 
+// config.SidebarBoxes.Box
+typedef struct {
+  const char* name;
+  uint16_t lines;
+} ghostty_config_sidebar_box_s;
+
+// config.SidebarBoxes
+typedef struct {
+  const ghostty_config_sidebar_box_s* boxes;
+  size_t len;
+} ghostty_config_sidebar_box_list_s;
+
 // config.Palette
 typedef struct {
   ghostty_config_color_s colors[256];
