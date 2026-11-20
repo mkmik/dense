@@ -91,9 +91,15 @@ struct SpaceWindowView<Terminal: View>: View {
                     // A combo with a web tab: the page and the terminal area (or another
                     // page), with a line between them to drag. How wide, is kept with the
                     // bond (see SpaceTabs.dragged).
-                    let pane = { (page: WebPage?) in
+                    let pane = { (page: (any TabPage)?) in
                         Group {
-                            if let page { WebPane(page: page) } else { terminal.padding(.leading, 8) }
+                            if let web = page as? WebPage {
+                                WebPane(page: web)
+                            } else if let page {
+                                PageHost(view: page.root)
+                            } else {
+                                terminal.padding(.leading, 8)
+                            }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -274,9 +280,12 @@ private struct SurfaceTabBar: View {
         let front = surface.id == tabs.active
         return Button { tabs.show(surface) } label: {
             HStack(spacing: 5) {
-                // A globe for a browser, a page for a web page, a sparkle for a coding agent.
+                // A globe for a browser, a page for a web page, tiles for an Extension's
+                // panel, a sparkle for a coding agent.
                 if let web = surface.spec.web {
                     Image(systemName: web.navigation == true ? "globe" : "doc.richtext").imageScale(.small)
+                } else if surface.spec.ui != nil {
+                    Image(systemName: "square.grid.2x2").imageScale(.small)
                 } else if SpaceStore.shared.den(of: surface)?.agent == true {
                     Image(systemName: "sparkle").imageScale(.small)
                 } else {
@@ -297,13 +306,14 @@ private struct SurfaceTabBar: View {
         })
         .contextMenu {
             Button("Rename Tab…") { tabs.renameTab(surface) }
+            Button("Move to Sidebar") { tabs.place(surface, inSidebar: true) }
             if stop.count > 1 {
                 Button("Unglue Tab") { tabs.unglue(surface.id) }
             } else if let left = tabs.glueTarget(left: surface.id) {
                 Button("Glue to Tab on the Left") { tabs.glue(surface.id, beside: left.id) }
             }
             Divider()
-            Button(surface.spec.web == nil ? "Close Tab…" : "Close Tab", role: .destructive) { tabs.closeTab(surface) }
+            Button(surface.spec.terminal != nil ? "Close Tab…" : "Close Tab", role: .destructive) { tabs.closeTab(surface) }
         }
         .offset(x: drag.flatMap { $0.id == surface.id && $0.glue && stop.count > 1 ? $0.dx : nil } ?? 0)
         .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named("tabs"))

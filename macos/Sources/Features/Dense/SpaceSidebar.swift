@@ -34,6 +34,10 @@ struct SpaceSidebar: View {
     var body: some View {
         VStack(spacing: 0) {
             spaces
+            // The selected Space's Surfaces placed in the sidebar.
+            if let space = tabs.selected.flatMap({ store.spaces[$0] }) {
+                SidebarSections(space: space, tabs: tabs)
+            }
             filterBar
         }
         .font(Font(font))

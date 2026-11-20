@@ -61,9 +61,12 @@ struct Surface: DennetObject {
         var beside: String?
         /// How much of the combo's width this tab takes when glued, in percent; nil is half.
         var width: Int32?
+        /// Where it goes: nil for a tab, or "sidebar" for a section of its Space's sidebar.
+        var placement: String?
         var kind: String?
         var terminal: Terminal?
         var web: Web?
+        var ui: UI?
     }
 
     struct Terminal: Decodable, Equatable {
@@ -82,8 +85,21 @@ struct Surface: DennetObject {
         var navigation: Bool?
     }
 
+    /// A Surface an Extension draws, with A2UI: its surface whose surfaceId is this
+    /// Surface's name. Shown by `UIPage` in a tab, by `A2UIView` in the sidebar.
+    struct UI: Decodable, Equatable {
+        /// The name of the Extension, in the same namespace.
+        var `extension`: String
+    }
+
     var metadata: ObjectMeta
     var spec: Spec
+
+    /// The id of the Extension that draws this Surface, for one of kind ui.
+    var uiExtension: String? { spec.ui.map { objectID(metadata.namespace, $0.extension) } }
+
+    /// Whether it is a section of its Space's sidebar rather than a tab.
+    var inSidebar: Bool { spec.placement == "sidebar" }
 }
 
 /// A program in a tab asking dense to show a Space, or a tab of one: the
@@ -191,6 +207,19 @@ struct DennetHost: DennetObject {
         var socketPath: String?
         /// den there; without it, den is found on the PATH of a login, interactive shell there.
         var denPath: String?
+    }
+
+    var metadata: ObjectMeta
+    var spec: Spec
+}
+
+/// A program that shows its own UI in dense, such as ccwt: the Surfaces of kind ui that
+/// name it, drawn from what it sends on the Unix socket at `spec.endpoint`.
+/// See `A2UIHub`. dennet keeps its status, which dense doesn't read: it sees for itself
+/// whether the socket answers.
+struct DennetExtension: DennetObject {
+    struct Spec: Decodable, Equatable {
+        var endpoint: String
     }
 
     var metadata: ObjectMeta
@@ -309,20 +338,28 @@ extension Space {
         }
     }
 
-    /// This space's tabs: its Surfaces of a kind dense shows (terminal and web), sorted by
-    /// order, then name.
+    /// This space's tabs, in order: its `shown` Surfaces not in the sidebar.
     func tabs(_ surfaces: [Surface]) -> [Surface] {
+        shown(surfaces).filter { ($0.spec.placement ?? "").isEmpty }
+    }
+
+    /// This space's sections of the sidebar, in order.
+    func sidebar(_ surfaces: [Surface]) -> [Surface] { shown(surfaces).filter(\.inSidebar) }
+
+    /// This space's Surfaces of a kind dense shows (terminal, web and ui), wherever they go,
+    /// sorted by order, then name.
+    func shown(_ surfaces: [Surface]) -> [Surface] {
         surfaces
             .filter {
                 $0.metadata.namespace == metadata.namespace && $0.spec.space == metadata.name
-                    && ($0.spec.terminal != nil || $0.spec.web != nil)
+                    && ($0.spec.terminal != nil || $0.spec.web != nil || $0.spec.ui != nil)
             }
             .sorted { ($0.spec.order ?? 0, $0.metadata.name) < ($1.spec.order ?? 0, $1.metadata.name) }
     }
 }
 
-/// Watches the Spaces, Surfaces and Dens in dennet and keeps `spaces`, `surfaces` and
-/// `dens` up to date.
+/// Watches the Spaces, Surfaces, Dens, Hosts and Extensions in dennet and keeps `spaces`,
+/// `surfaces`, `dens`, `hosts` and `extensions` up to date.
 ///
 /// dennet's lists across all namespaces have only this machine's objects. So for each
 /// Host it also watches the Host's namespace, which dennet forwards to that machine, and
@@ -334,7 +371,10 @@ extension Space {
 /// the old list replaced, so a reconnect never shows an empty or half-filled sidebar.
 /// When a connection drops, it reconnects after two seconds.
 final class SpaceStore: ObservableObject {
-    static let shared = SpaceStore(socketPath: NSString(string: "~/.local/state/dennet/dennet.sock").expandingTildeInPath)
+    /// The dennet socket. `open -n Dense.app --args -dense.dennetSocket PATH` starts one
+    /// instance on another dennet, as for trying a dennet of a work tree.
+    static let shared = SpaceStore(socketPath: UserDefaults.standard.string(forKey: "dense.dennetSocket")
+        ?? NSString(string: "~/.local/state/dennet/dennet.sock").expandingTildeInPath)
 
     /// Spaces by `id`.
     @Published private(set) var spaces: [String: Space] = [:]
@@ -344,6 +384,10 @@ final class SpaceStore: ObservableObject {
 
     /// Dens by `id`.
     @Published private(set) var dens: [String: Den] = [:]
+
+    /// Extensions by `id`, this machine's only: a Host's extensions run there, out of reach
+    /// (see `A2UIHub`).
+    @Published private(set) var extensions: [String: DennetExtension] = [:]
 
     /// Hosts by `id`.
     @Published private(set) var hosts: [String: DennetHost] = [:] {
@@ -408,6 +452,7 @@ final class SpaceStore: ObservableObject {
             self.watch("surfaces", \.surfaces)
             self.watch("dens", \.dens)
             self.watch("hosts", \.hosts)
+            self.watch("extensions", \.extensions)
         }
     }
 
@@ -598,7 +643,7 @@ final class SpaceStore: ObservableObject {
                                 } else {
                                     self.problem = nil
                                     self.loadedLists.insert(resource)
-                                    if !self.loaded && self.loadedLists.count == 4 { self.loaded = true }
+                                    if !self.loaded && self.loadedLists.isSuperset(of: ["spaces", "surfaces", "dens", "hosts"]) { self.loaded = true }
                                 }
                             }
                         } else if let object = event.object {

@@ -2,14 +2,36 @@ import AppKit
 import SwiftUI
 import WebKit
 
+/// What a tab with no terminal shows, in the terminal area's place: a web page, or an
+/// Extension's surface (`UIPage`).
+protocol TabPage: AnyObject {
+    /// The view to put in the window; the tab comes to the front when it takes the focus.
+    var root: NSView { get }
+}
+
+extension TabPage {
+    /// Moves the focus to the view, now or once it is in a window.
+    func focus() {
+        if let window = root.window {
+            window.makeFirstResponder(root)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let root = self?.root else { return }
+                root.window?.makeFirstResponder(root)
+            }
+        }
+    }
+}
+
 /// What a web tab shows (a Surface of kind web): one page, or with `navigation` a small
 /// browser. The tab keeps its page while it is out of view, as a terminal tab keeps its
 /// terminal, so switching back is instant.
 ///
 /// Without `navigation`, the tab shows only its page: a link clicked there opens in the
 /// default browser instead. The page's own scripts may still load other pages.
-final class WebPage: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
+final class WebPage: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, TabPage {
     let view: PageView
+    var root: NSView { view }
 
     /// Asks for another page for the tab; Change Page… in the page's menu, without navigation.
     var change: (() -> Void)?
@@ -84,18 +106,6 @@ final class WebPage: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             return URL(fileURLWithPath: NSString(string: address).expandingTildeInPath)
         }
         return address.isEmpty ? nil : URL(string: address.contains("://") ? address : "https://" + address)
-    }
-
-    /// Moves the focus to the page, now or once it is in a window.
-    func focus() {
-        if let window = view.window {
-            window.makeFirstResponder(view)
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                guard let view = self?.view else { return }
-                view.window?.makeFirstResponder(view)
-            }
-        }
     }
 
     func webView(
@@ -221,7 +231,7 @@ struct WebPane: View {
                 .onAppear { address = page.url?.absoluteString ?? "" }
                 .onChange(of: page.url) { address = $0?.absoluteString ?? "" }
             }
-            WebViewHost(view: page.view)
+            PageHost(view: page.root)
         }
     }
 
@@ -236,10 +246,10 @@ struct WebPane: View {
     }
 }
 
-/// Puts a page's web view, made once by its `WebPage`, in the SwiftUI layout. It goes in a
+/// Puts a page's view, made once by its `TabPage`, in the SwiftUI layout. It goes in a
 /// box of its own, as SwiftUI may make the next box before it drops the last one.
-private struct WebViewHost: NSViewRepresentable {
-    let view: WKWebView
+struct PageHost: NSViewRepresentable {
+    let view: NSView
 
     func makeNSView(context: Context) -> NSView { NSView() }
 

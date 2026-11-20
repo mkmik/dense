@@ -8,7 +8,7 @@ refs = ["https://github.com/mkmik/dennet"]
 
 [[feature]]
 id = "api"
-title = "Watch, create and patch Spaces, Surfaces, Dens and Hosts"
+title = "Watch, create and patch Spaces, Surfaces, Dens, Hosts and Extensions"
 status = "done"
 
 [[feature]]
@@ -30,6 +30,18 @@ title = "A Surface field keeping how wide a glued Surface is"
 status = "done"
 milestone = "m1"
 note = "spec.width, in percent; t8y:/api/surface#glue-width in dennet's map"
+
+[[feature]]
+id = "a2ui"
+title = "Extension and Surface kind ui: who fills an A2UI surface"
+status = "done"
+note = "t8y:/api/extension and t8y:/api/surface#ui in dennet's map"
+
+[[feature]]
+id = "placement"
+title = "Surface spec.placement: a tab, or sidebar"
+status = "done"
+note = "t8y:/api/surface#sidebar in dennet's map"
 +++
 
 Only what dense needs from dennet. dennet has its own map.
