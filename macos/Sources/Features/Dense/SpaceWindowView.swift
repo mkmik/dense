@@ -125,7 +125,6 @@ struct SpaceWindowView<Terminal: View>: View {
         // ponytail: with background-opacity below 1 the terminal area gets the
         // opacity twice; draw this only outside the terminal if that bothers anyone.
         .background(ghostty.config.backgroundColor.opacity(ghostty.config.backgroundOpacity))
-        .overlay(alignment: .bottomTrailing) { NewBuildPill() }
         .overlay(alignment: .topTrailing) {
             HStack(spacing: 0) {
                 NotWindowDraggable(content: Button { openLinks = openLinks == "tab" ? "" : "tab" } label: {
@@ -137,6 +136,7 @@ struct SpaceWindowView<Terminal: View>: View {
                       ? "Links open in a browser tab here. Click to open them in the default browser."
                       : "Links open in the default browser. Click to open them in a browser tab here."))
                 .padding(.trailing, 8)
+                NewBuildPill()
                 PreviewPill()
             }
             .frame(height: Self.titlebarHeight)
