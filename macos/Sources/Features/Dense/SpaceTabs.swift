@@ -91,6 +91,10 @@ final class SpaceTabs: ObservableObject {
     private var history: [String] = []
     private var historyIndex = -1
 
+    /// The Spaces shown in this window, by Space id, most recent last, for ranking the
+    /// Spaces that match in Open Space (⌘K).
+    private(set) var recentSpaces: [String] = []
+
     /// Text to type into a new tab once it is attached, by Surface id.
     private var pendingInput: [String: String] = [:]
 
@@ -409,6 +413,10 @@ final class SpaceTabs: ObservableObject {
                 history.append(id)
                 historyIndex = history.count - 1
             }
+        }
+        if let selected {
+            recentSpaces.removeAll { $0 == selected }
+            recentSpaces.append(selected)
         }
         if let selected, let surface {
             lastTab[selected] = surface.id

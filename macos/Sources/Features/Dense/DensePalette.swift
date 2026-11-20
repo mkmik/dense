@@ -84,10 +84,15 @@ extension SpaceTabs {
     /// its tags as "#tag". Collapsed Spaces show their subspaces here. The archived Spaces
     /// come last, greyed out and found by "archived" too; opening one brings it back. Each
     /// row shows its whole path, "space / subspace / subsubspace", rather than indenting.
+    /// The Spaces shown most recently come first, but for the selected one, which is already
+    /// in front: the first, selected when the palette opens, is the Space shown before this
+    /// one, so ⌘K and Return go back and forth between two Spaces. The palette keeps this
+    /// order among the Spaces that match a query equally well.
     func openOptions(look: TerminalLook) -> [CommandOption] {
         let store = SpaceStore.shared
         let cell = look.cell
-        return [false, true].flatMap { archived in
+        let rank = Dictionary(recentSpaces.enumerated().map { ($1, $0 + 1) }) { $1 }
+        let rows = [false, true].flatMap { archived in
             let rows = ([nil] + store.hostNames.map(Optional.some)).flatMap { host in
                 Space.rows(store.spaces(on: host, archived: archived).map { space in
                     var space = space
@@ -95,10 +100,10 @@ extension SpaceTabs {
                     return space
                 })
             }
-            return rows.map { row in
+            return rows.map { row -> (CommandOption, Int) in
                 let path = Self.path(row.space, in: store.spaces)
                 let tags = row.space.spec.tags.map { $0.map { "#" + $0 }.joined(separator: " ") }
-                return CommandOption(
+                let option = CommandOption(
                     title: Self.title(row.space),
                     subtitle: path,
                     description: archived ? ["archived", tags].compactMap { $0 }.joined(separator: " ") : tags,
@@ -108,8 +113,11 @@ extension SpaceTabs {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .font(Font(look.font)))
                 ) { archived ? self.unarchiveSpace(row.space) : self.select(row.space) }
+                return (option, row.space.id == selected ? 0 : rank[row.space.id] ?? 0)
             }
         }
+        // Stable: unvisited Spaces keep the sidebar's order.
+        return rows.enumerated().sorted { ($0.element.1, -$0.offset) > ($1.element.1, -$1.offset) }.map(\.element.0)
     }
 
     private static func title(_ space: Space) -> String {
