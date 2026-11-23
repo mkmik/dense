@@ -42,6 +42,12 @@ status = "done"
 note = "invokeCommand runs a Ghostty action; commands from Extensions wait for the extension-resources design"
 
 [[feature]]
+id = "toolbar-button"
+title = "ToolbarButton in dense's catalog: an SF Symbol button styled as dense's own"
+status = "done"
+note = "Secondary, or in a StatusBadge kind's color; without an action, a Modal's trigger"
+
+[[feature]]
 id = "catalog-more"
 title = "DiffStat, Code, KeyHint and denGet in dense's catalog"
 status = "todo"

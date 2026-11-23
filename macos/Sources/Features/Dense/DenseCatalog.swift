@@ -15,7 +15,7 @@ import SwiftUI
 /// commands. A surface may use it as its catalog, or use the basic catalog and pick dense's
 /// components one by one with "@catalogId".
 ///
-/// Components: SurfaceLink, StatusBadge, KeyValue, Section. Functions, each only from a
+/// Components: SurfaceLink, StatusBadge, KeyValue, Section, ToolbarButton. Functions, each only from a
 /// click: focusSurface, invokeCommand, copyText. Nothing here types into a terminal or acts
 /// without a click; an Extension that needs to does it through dennet.
 enum DenseCatalog {
@@ -44,6 +44,12 @@ enum DenseCatalog {
                 "collapsed": {"$ref": "\(common)DynamicBoolean"},
                 "child": {"$ref": "\(common)Child"}
                 """, required: ["title", "child"])) { SectionView(node: $0) },
+            ComponentImplementation(name: "ToolbarButton", schema: schema("ToolbarButton", """
+                "icon": {"$ref": "\(common)DynamicString"},
+                "help": {"$ref": "\(common)DynamicString"},
+                "kind": {"$ref": "\(common)DynamicString"},
+                "action": {"$ref": "\(common)Action"}
+                """, required: ["icon"])) { ToolbarButtonView(node: $0) },
         ]
         let functions: [any FunctionImplementation] = [
             DenseFunction("focusSurface", #"{"ref": {"type": "string"}}"#, required: ["ref"]) { args in
@@ -219,7 +225,7 @@ private struct StatusBadgeView: View {
     }
 
     /// The colors of the sidebar's state dots and badges (see `SpaceRow`).
-    private static func color(_ kind: String?) -> Color {
+    static func color(_ kind: String?) -> Color {
         switch kind {
         case "ok": return .green
         case "warn": return .orange
@@ -227,6 +233,29 @@ private struct StatusBadgeView: View {
         case "busy": return .blue
         default: return .secondary
         }
+    }
+}
+
+/// A button as dense draws its own in the sidebar and the titlebar: an SF Symbol in a
+/// 22-point square, secondary, or in the color `kind` gives a StatusBadge. Without an
+/// action it is the symbol alone, for a Modal to use as its trigger: a click on it
+/// opens the Modal, which a Button would swallow.
+private struct ToolbarButtonView: View {
+    let node: Node
+
+    var body: some View {
+        let symbol = Image(systemName: node.string(for: "icon") ?? "questionmark")
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
+            .foregroundStyle(StatusBadgeView.color(node.string(for: "kind")))
+        Group {
+            if let action = node.action(for: "action", userActivation: true) {
+                Button { action() } label: { symbol }.buttonStyle(.plain)
+            } else {
+                symbol
+            }
+        }
+        .help(node.string(for: "help") ?? "")
     }
 }
 
