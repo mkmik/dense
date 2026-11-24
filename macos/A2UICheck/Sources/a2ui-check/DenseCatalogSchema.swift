@@ -1,0 +1,1 @@
+../../../Sources/Features/Dense/DenseCatalogSchema.swift

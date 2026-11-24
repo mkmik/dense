@@ -1,0 +1,21 @@
+name: a2ui-check
+# Would this dense still draw dowt's panels? Checks dowt's main panels against the catalog
+# of the change, without building dense (macos/A2UICheck).
+on:
+  push:
+    branches: [main]
+    paths: ["macos/Sources/Features/Dense/**", "macos/A2UICheck/**", "macos/Ghostty.xcodeproj/**", ".github/workflows/a2ui-check.yml"]
+  pull_request:
+    paths: ["macos/Sources/Features/Dense/**", "macos/A2UICheck/**", "macos/Ghostty.xcodeproj/**", ".github/workflows/a2ui-check.yml"]
+jobs:
+  check:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: macos
+      - uses: actions/cache@v4
+        with:
+          path: macos/A2UICheck/.build
+          key: a2ui-check-${{ hashFiles('macos/Ghostty.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'macos/A2UICheck/Package.swift') }}
+      - run: macos/A2UICheck/check.sh --dowt

@@ -32,3 +32,10 @@
       application.
   (5) When done, quit via:
       `osascript -e 'tell application "<absolute path to build/Debug/Ghostty.app>" to quit'`
+
+## A2UI catalog
+
+- What dense's A2UI catalog accepts is in
+  `Sources/Features/Dense/DenseCatalogSchema.swift`. After changing it, or the
+  A2UI package, run `macos/A2UICheck/check.sh --dowt` (no dense build; a minute
+  or two the first time): a catalog that refuses dowt's panels must not merge.
