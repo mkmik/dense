@@ -15,9 +15,11 @@ import SwiftUI
 /// commands. A surface may use it as its catalog, or use the basic catalog and pick dense's
 /// components one by one with "@catalogId".
 ///
-/// Components: SurfaceLink, StatusBadge, KeyValue, Section, ToolbarButton. Functions, each only from a
-/// click: focusSurface, invokeCommand, copyText. Nothing here types into a terminal or acts
-/// without a click; an Extension that needs to does it through dennet.
+/// Components: SurfaceLink, StatusBadge, KeyValue, Section, ToolbarButton, and the basic
+/// Button, which Return clicks when it is primary, so Return in a sheet's field submits it.
+/// Functions, each only from a click: focusSurface, invokeCommand, copyText. Nothing here
+/// types into a terminal or acts without a click; an Extension that needs to does it through
+/// dennet.
 enum DenseCatalog {
     static let id = "https://dense.mkm.pub/a2ui/v1/catalog.json"
 
@@ -27,6 +29,10 @@ enum DenseCatalog {
     static func catalogs(namespace: String, urlOpener: A2UIURLOpener) -> [Catalog<ComponentImplementation>] {
         let basic = BasicCatalogImplementation.makeCatalog(version: .v10, openURLHandler: urlOpener)
         let components = [
+            ComponentImplementation(api: BasicCatalogComponents.button) { node in
+                A2UIButton(node: node)
+                    .keyboardShortcut(node.string(for: "variant") == "primary" ? .defaultAction : nil)
+            },
             ComponentImplementation(name: "SurfaceLink", schema: schema("SurfaceLink", """
                 "surface": {"$ref": "\(common)DynamicString"},
                 "label": {"$ref": "\(common)DynamicString"},
@@ -64,7 +70,7 @@ enum DenseCatalog {
             },
         ]
         let dense = Catalog(id: id, protocolVersion: .v10,
-                            components: Array(basic.components.values) + components,
+                            components: basic.components.values.filter { $0.name != "Button" } + components,
                             functions: Array(basic.functions.values) + functions)
         return [basic, dense]
     }
