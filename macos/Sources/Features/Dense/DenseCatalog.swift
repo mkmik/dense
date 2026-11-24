@@ -21,90 +21,37 @@ import SwiftUI
 /// types into a terminal or acts without a click; an Extension that needs to does it through
 /// dennet.
 enum DenseCatalog {
-    static let id = "https://dense.mkm.pub/a2ui/v1/catalog.json"
+    static let id = DenseCatalogSchema.id
 
     /// The catalogs of a session with an Extension in `namespace`, whose surface references
-    /// name tabs in that namespace.
+    /// name tabs in that namespace. What they accept is `DenseCatalogSchema`'s.
     @MainActor
     static func catalogs(namespace: String, urlOpener: A2UIURLOpener) -> [Catalog<ComponentImplementation>] {
         let basic = BasicCatalogImplementation.makeCatalog(version: .v10, openURLHandler: urlOpener)
         let components = [
-            ComponentImplementation(api: BasicCatalogComponents.button) { node in
+            ComponentImplementation(api: DenseCatalogSchema.button) { node in
                 A2UIButton(node: node)
                     .keyboardShortcut(node.string(for: "variant") == "primary" ? .defaultAction : nil)
             },
-            ComponentImplementation(name: "SurfaceLink", schema: schema("SurfaceLink", """
-                "surface": {"$ref": "\(common)DynamicString"},
-                "label": {"$ref": "\(common)DynamicString"},
-                "showState": {"$ref": "\(common)DynamicBoolean"}
-                """, required: ["surface"])) { SurfaceLinkView(node: $0, namespace: namespace) },
-            ComponentImplementation(name: "StatusBadge", schema: schema("StatusBadge", """
-                "kind": {"$ref": "\(common)DynamicString"},
-                "text": {"$ref": "\(common)DynamicString"}
-                """, required: ["kind", "text"])) { StatusBadgeView(node: $0) },
-            ComponentImplementation(name: "KeyValue", schema: schema("KeyValue", """
-                "rows": {"$ref": "\(common)DynamicValue"}
-                """, required: ["rows"])) { KeyValueView(node: $0) },
-            ComponentImplementation(name: "Section", schema: schema("Section", """
-                "title": {"$ref": "\(common)DynamicString"},
-                "collapsed": {"$ref": "\(common)DynamicBoolean"},
-                "child": {"$ref": "\(common)Child"}
-                """, required: ["title", "child"])) { SectionView(node: $0) },
-            ComponentImplementation(name: "ToolbarButton", schema: schema("ToolbarButton", """
-                "icon": {"$ref": "\(common)DynamicString"},
-                "help": {"$ref": "\(common)DynamicString"},
-                "kind": {"$ref": "\(common)DynamicString"},
-                "action": {"$ref": "\(common)Action"}
-                """, required: ["icon"])) { ToolbarButtonView(node: $0) },
+            ComponentImplementation(api: DenseCatalogSchema.surfaceLink) { SurfaceLinkView(node: $0, namespace: namespace) },
+            ComponentImplementation(api: DenseCatalogSchema.statusBadge) { StatusBadgeView(node: $0) },
+            ComponentImplementation(api: DenseCatalogSchema.keyValue) { KeyValueView(node: $0) },
+            ComponentImplementation(api: DenseCatalogSchema.section) { SectionView(node: $0) },
+            ComponentImplementation(api: DenseCatalogSchema.toolbarButton) { ToolbarButtonView(node: $0) },
         ]
         let functions: [any FunctionImplementation] = [
-            DenseFunction("focusSurface", #"{"ref": {"type": "string"}}"#, required: ["ref"]) { args in
+            DenseFunction(DenseCatalogSchema.focusSurface) { args in
                 try focus(args["ref"]?.stringValue ?? "", namespace: namespace)
             },
-            DenseFunction("invokeCommand", #"{"id": {"type": "string"}, "args": {}}"#, required: ["id"]) { args in
+            DenseFunction(DenseCatalogSchema.invokeCommand) { args in
                 try invoke(args["id"]?.stringValue ?? "", args["args"])
             },
-            DenseFunction("copyText", #"{"text": {"type": "string"}}"#, required: ["text"]) { args in
+            DenseFunction(DenseCatalogSchema.copyText) { args in
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(args["text"]?.stringValue ?? "", forType: .string)
             },
         ]
-        let dense = Catalog(id: id, protocolVersion: .v10,
-                            components: basic.components.values.filter { $0.name != "Button" } + components,
-                            functions: Array(basic.functions.values) + functions)
-        return [basic, dense]
-    }
-
-    private static let common = "https://a2ui.org/specification/v1_0/common_types.json#/$defs/"
-
-    /// A component's schema: its own `properties` (JSON, without the braces) and the ones
-    /// every v1.0 component has.
-    private static func schema(_ name: String, _ properties: String, required: [String]) -> Schema {
-        let required = (["component"] + required).map { "\"\($0)\"" }.joined(separator: ", ")
-        return compiled("""
-            {
-              "type": "object",
-              "properties": {
-                "id": {"$ref": "\(common)ComponentId"},
-                "component": {"const": "\(name)"},
-                "@catalogId": {"type": "string"},
-                "@metadata": {"type": "object"},
-                "@accessibility": {"$ref": "\(common)AccessibilityAttributes"},
-                "weight": {"type": "number"},
-                \(properties)
-              },
-              "required": [\(required)]
-            }
-            """)
-    }
-
-    /// A schema written here. They are fixed, so a failure is a typo found on the first run.
-    fileprivate static func compiled(_ json: String) -> Schema {
-        do {
-            return try Schema(instance: json, remoteSchemas: A2UICommonSchema.allSchemas)
-        } catch {
-            fatalError("dense's A2UI catalog: \(error)\n\(json)")
-        }
+        return [basic, DenseCatalogSchema.catalog(basic: basic, components: components, functions: functions)]
     }
 
     /// The tab a surface reference names, "surface/NAME" or just "NAME", in `namespace`.
@@ -158,12 +105,8 @@ private final class DenseFunction: FunctionImplementation, @unchecked Sendable {
     let api: FunctionAPI
     private let run: @MainActor ([String: JSONValue]) throws -> Void
 
-    init(_ name: String, _ properties: String, required: [String], run: @escaping @MainActor ([String: JSONValue]) throws -> Void) {
-        let required = required.map { "\"\($0)\"" }.joined(separator: ", ")
-        api = FunctionAPI(
-            name: name, returnType: .void,
-            schema: DenseCatalog.compiled(#"{"type": "object", "properties": \#(properties), "required": [\#(required)]}"#),
-            allowedCallers: .rendererOnly, requiresUserActivation: true)
+    init(_ api: FunctionAPI, run: @escaping @MainActor ([String: JSONValue]) throws -> Void) {
+        self.api = api
         self.run = run
     }
 
