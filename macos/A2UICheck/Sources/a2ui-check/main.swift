@@ -41,6 +41,7 @@ for file in files.isEmpty ? ["-"] : Array(files) {
     }
 }
 
+if count == 0 && errors.isEmpty { errors.append("no messages: nothing was checked") }
 for error in errors { print(error) }
 print(errors.isEmpty ? "ok: \(count) messages" : "\(errors.count) errors in \(count) messages")
 exit(errors.isEmpty ? 0 : 1)

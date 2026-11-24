@@ -11,7 +11,9 @@ pkg=$(cd "$(dirname "$0")" && pwd)
 cp "$pkg/../Ghostty.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved" "$pkg/"
 swift build --package-path "$pkg" --force-resolved-versions -q
 if [ "$1" = --dowt ]; then
-    curl -fsSL https://raw.githubusercontent.com/mkmik/dowt/main/testdata/panels.jsonl | "$pkg/.build/debug/a2ui-check"
+    # To a file first: a failed download in a pipe would pass as "ok: 0 messages".
+    curl -fsSL -o "$pkg/.build/dowt-panels.jsonl" https://raw.githubusercontent.com/mkmik/dowt/main/testdata/panels.jsonl
+    "$pkg/.build/debug/a2ui-check" "$pkg/.build/dowt-panels.jsonl"
 else
     "$pkg/.build/debug/a2ui-check" "$@"
 fi
