@@ -109,13 +109,14 @@ struct Surface: DennetObject {
     var drawable: Bool { spec.terminal != nil || spec.web != nil || spec.ui != nil }
 }
 
-/// A program in a tab asking dense to show a Space, or a tab of one: the
-/// `dense.mkm.pub/show` annotation on that tab's Surface, as JSON
+/// A program in a tab, or an Extension, asking dense to show a Space, or a tab of one: the
+/// `dense.mkm.pub/show` annotation on that tab's (or panel's) Surface, as JSON
 /// `{"space": name, "surface": name, "at": time}`, names in the Surface's namespace. A
 /// tab alone is enough; its Space is found from it. The time is there only so that every
 /// request is a change to the annotation, even one asking for what the last one did.
 ///
-/// Only the window that was just typed into the tab that asks does what it says (see
+/// Only the window that was just typed into the tab that asks, or that just clicked the panel
+/// that asks, does what it says (see
 /// `SpaceTabs.obeys`), so each window keeps showing what it shows otherwise. Nothing in
 /// dennet says what a window shows.
 struct ShowRequest: Decodable, Equatable {
