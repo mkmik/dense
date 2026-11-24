@@ -51,6 +51,14 @@ pub fn init(
     const env = b.graph.environ_map;
     const app_path = b.fmt("macos/build/{s}/Dense.app", .{xc_config});
 
+    // dense: Swift packages are cloned to one folder that every worktree uses.
+    // Otherwise each new worktree clones and checks out ~1.3GB of packages
+    // (swift-syntax is most of it) before it can build anything.
+    const spm_args: []const []const u8 = if (env.get("HOME")) |home| &.{
+        "-clonedSourcePackagesDirPath",
+        b.fmt("{s}/Library/Caches/dense/SourcePackages", .{home}),
+    } else &.{};
+
     // Our step to build the Ghostty macOS app.
     const build = build: {
         // External environment variables can mess up xcodebuild, so
@@ -85,6 +93,7 @@ pub fn init(
             "-skipMacroValidation",
             "-skipPackagePluginValidation",
         });
+        step.addArgs(spm_args);
 
         // dense: a scheme build needs a destination. The generic one builds every
         // architecture, as -target did; ARCHS narrows it, since xcodebuild refuses -arch
@@ -126,6 +135,7 @@ pub fn init(
             "-skipMacroValidation",
             "-skipPackagePluginValidation",
         });
+        step.addArgs(spm_args);
         if (xc_arch) |arch| step.addArgs(&.{ "-arch", arch });
 
         // We need the xcframework
