@@ -29,4 +29,12 @@ struct ShowRequestTests {
         #expect(!SpaceTabs.obeys(request, active: "far/ccwt", lastKey: now - 30, now: now))
         #expect(!SpaceTabs.obeys(request, active: nil, lastKey: now, now: now))
     }
+
+    @Test func theWindowThatClickedTheAskingPanelObeysForAMinute() throws {
+        let request = try #require(ShowRequest(asking(#"{"space":"wt","at":"x"}"#)))
+        let now = Date()
+        #expect(SpaceTabs.obeys(request, active: nil, lastKey: .distantPast, lastClick: ("far/ccwt", now - 20), now: now))
+        #expect(!SpaceTabs.obeys(request, active: nil, lastKey: .distantPast, lastClick: ("far/ccwt", now - 90), now: now))
+        #expect(!SpaceTabs.obeys(request, active: nil, lastKey: now, lastClick: ("far/other", now), now: now))
+    }
 }

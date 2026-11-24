@@ -205,8 +205,14 @@ final class ExtensionSession: ObservableObject {
     }
 
     /// A message for the Extension: an action, a function call or its answer, or an error.
-    /// An error about a surface shows on it, and asks for the surface again.
+    /// An action marks its window as the one the surface's next ShowRequest is for. An error
+    /// about a surface shows on it, and asks for the surface again.
     private func outbound(_ message: RendererToAgentMessage) {
+        // An action is a click, in the window in front: a ShowRequest the Extension makes
+        // of it is for that window.
+        if case .action(let action) = message {
+            DenseCatalog.keyController?.spaceTabs.clicked(objectID(namespace, action.surfaceID))
+        }
         if case .error(let error) = message {
             let fields = (try? JSONEncoder().encode(error)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
             guard let name = fields?["surfaceId"] as? String, wanted.contains(name) else { return }

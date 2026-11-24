@@ -106,10 +106,11 @@ enum DenseCatalog {
         objectID(namespace, ref.hasPrefix("surface/") ? String(ref.dropFirst("surface/".count)) : ref)
     }
 
-    /// The window the user just clicked in.
+    /// The window the user just clicked in: the one a panel's sheet is on, for a click in it.
     @MainActor
-    private static var keyController: TerminalController? {
-        NSApp.keyWindow?.windowController as? TerminalController
+    static var keyController: TerminalController? {
+        let window = NSApp.keyWindow
+        return (window?.sheetParent ?? window)?.windowController as? TerminalController
     }
 
     /// Shows a tab, in the Space it is in, in the window clicked in.

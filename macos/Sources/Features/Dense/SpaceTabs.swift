@@ -27,8 +27,8 @@ import GhosttyKit
 /// The selected Space and each Space's front tab are saved in the user defaults, and a new
 /// window opens on them once dennet's lists have loaded.
 ///
-/// A program in a tab can ask for another Space or tab to be shown (`ShowRequest`). The
-/// window that does it is the one the user asked from, see `obeys`.
+/// A program in a tab, or an Extension's panel, can ask for another Space or tab to be shown
+/// (`ShowRequest`). The window that does it is the one the user asked from, see `obeys`.
 final class SpaceTabs: ObservableObject {
     /// The id of the Space shown, or nil while the window shows its own terminal.
     @Published private(set) var selected: String?
@@ -115,6 +115,8 @@ final class SpaceTabs: ObservableObject {
 
     /// When a key was last pressed in this window.
     private var lastKey = Date.distantPast
+    /// The ui Surface (by id) whose panel was last clicked in this window, and when.
+    private var lastClick: (surface: String, at: Date)?
     private var keyMonitor: Any?
     private var showRequests: AnyCancellable?
     /// A request obeyed whose Space or tab dennet hasn't sent yet, and until when to wait.
@@ -202,7 +204,7 @@ final class SpaceTabs: ObservableObject {
             return event
         }
         showRequests = store.showRequests.receive(on: DispatchQueue.main).sink { [weak self] request in
-            guard let self, SpaceTabs.obeys(request, active: self.active, lastKey: self.lastKey) else { return }
+            guard let self, SpaceTabs.obeys(request, active: self.active, lastKey: self.lastKey, lastClick: self.lastClick) else { return }
             self.pendingShow = nil
             if !self.go(to: request) { self.pendingShow = (request, Date() + 10) }
         }
@@ -220,8 +222,18 @@ final class SpaceTabs: ObservableObject {
     /// front here, and a key was pressed here a moment ago. That is the window whose key press
     /// made the program ask, which is the same window den gives the terminal's size to: the
     /// one last typed into. Other windows showing that tab, here or on another machine, stay.
-    static func obeys(_ request: ShowRequest, active: String?, lastKey: Date, now: Date = Date()) -> Bool {
-        request.from == active && now.timeIntervalSince(lastKey) < 5
+    /// Or the request comes from a panel clicked in this window in the last minute: an
+    /// Extension asks once the click's work is done, which can take a while (a new worktree).
+    static func obeys(_ request: ShowRequest, active: String?, lastKey: Date,
+                      lastClick: (surface: String, at: Date)? = nil, now: Date = Date()) -> Bool {
+        if request.from == active && now.timeIntervalSince(lastKey) < 5 { return true }
+        guard let lastClick else { return false }
+        return request.from == lastClick.surface && now.timeIntervalSince(lastClick.at) < 60
+    }
+
+    /// Notes that the panel of the ui Surface `id` was just clicked in this window.
+    func clicked(_ id: String) {
+        lastClick = (id, Date())
     }
 
     /// Shows what a request asks for. False while dennet hasn't sent it yet.
