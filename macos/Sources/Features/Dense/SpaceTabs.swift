@@ -524,16 +524,17 @@ final class SpaceTabs: ObservableObject {
         return index > 0 ? tabs[index - 1] : rest.first
     }
 
-    /// Makes a new tab at the end of the selected Space: a Den and a Surface in dennet, then
-    /// shows it. The tab waits until the den runs. `config` is what Ghostty asks of a new
-    /// tab: working directory, command, environment, or text to type.
-    func newTab(_ config: Ghostty.SurfaceConfiguration?) {
-        guard let selected, let space = SpaceStore.shared.spaces[selected] else {
+    /// Makes a new tab at the end of the selected Space, or of `space`: a Den and a Surface
+    /// in dennet, then shows it if its Space is selected. The tab waits until the den runs.
+    /// `config` is what Ghostty asks of a new tab: working directory, command, environment,
+    /// or text to type.
+    func newTab(_ config: Ghostty.SurfaceConfiguration?, in space: Space? = nil) {
+        guard let space = space ?? selected.flatMap({ SpaceStore.shared.spaces[$0] }) else {
             NSSound.beep()
             return
         }
         let namespace = space.metadata.namespace ?? "default"
-        let order = (tabs.compactMap(\.spec.order).max() ?? 0) + 10
+        let order = (space.tabs(Array(SpaceStore.shared.surfaces.values)).compactMap(\.spec.order).max() ?? 0) + 10
 
         var den: [String: Any] = [
             // The Space's directory first, so a new tab starts there and not wherever the
@@ -681,7 +682,7 @@ final class SpaceTabs: ObservableObject {
     }
 
     /// Asks for a title and makes a new Space in dennet, under `parent` or at the top
-    /// level, after its siblings. Then shows it.
+    /// level, after its siblings. Then shows it, with a first terminal tab.
     func newSpace(parent: Space?) {
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.placeholderString = "Title"
@@ -708,6 +709,8 @@ final class SpaceTabs: ObservableObject {
                         "spaces", kind: "Space", namespace: namespace,
                         metadata: ["generateName": "space-"], spec: spec)
                     self.select(space)
+                    // Passed in: the watch may not have brought the new Space yet.
+                    self.newTab(nil, in: space)
                 } catch {
                     self.alert("Could not make a new Space", error)
                 }
@@ -725,6 +728,25 @@ final class SpaceTabs: ObservableObject {
         askTitle("Rename Space", space.spec.title) { title in
             guard !title.isEmpty else { return }
             self.setTitle(title, of: "spaces", space.metadata, failure: "Could not rename the Space")
+        }
+    }
+
+    /// Asks for the directory a Space's new tabs start in and writes it to dennet. Empty
+    /// removes it, and the Space uses the nearest one set above it. While the Space has one
+    /// terminal, dennet keeps it at that terminal's directory anyway.
+    func setWorkingDir(_ space: Space) {
+        let store = SpaceStore.shared
+        let inherited = space.spec.parent
+            .flatMap { store.spaces[objectID(space.metadata.namespace, $0)] }
+            .flatMap { Space.workingDir(of: $0, in: store.spaces) }
+        let local = space.metadata.namespace ?? "default" == "default"
+        askTitle("Working Directory", space.spec.workingDir, placeholder: inherited ?? "Absolute path", button: "Set") { typed in
+            // "~" is this Mac's home; a Host's Space must spell its directory out.
+            let dir = local ? (typed as NSString).expandingTildeInPath : typed
+            Task { @MainActor in
+                await self.patchSpec("spaces", space.metadata, ["workingDir": dir.isEmpty ? NSNull() : dir],
+                                     failure: "Could not set the working directory")
+            }
         }
     }
 
