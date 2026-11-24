@@ -188,6 +188,7 @@ struct SpaceSidebar: View {
                 Button("New Subspace…") { tabs.newSpace(parent: row.space) }
                 Button("Rename…") { tabs.renameSpace(row.space) }
                 Button("Edit Tags…") { tabs.editTags(row.space) }
+                Button("Set Working Directory…") { tabs.setWorkingDir(row.space) }
                 Divider()
                 Button("Archive Space…") { tabs.archiveSpace(row.space) }
                 Button("Delete Space…", role: .destructive) { tabs.deleteSpace(row.space) }
