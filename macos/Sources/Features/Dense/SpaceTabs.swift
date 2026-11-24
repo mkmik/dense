@@ -727,7 +727,10 @@ final class SpaceTabs: ObservableObject {
         let inherited = space.spec.parent
             .flatMap { store.spaces[objectID(space.metadata.namespace, $0)] }
             .flatMap { Space.workingDir(of: $0, in: store.spaces) }
-        askTitle("Working Directory", space.spec.workingDir, placeholder: inherited ?? "Absolute path", button: "Set") { dir in
+        let local = space.metadata.namespace ?? "default" == "default"
+        askTitle("Working Directory", space.spec.workingDir, placeholder: inherited ?? "Absolute path", button: "Set") { typed in
+            // "~" is this Mac's home; a Host's Space must spell its directory out.
+            let dir = local ? (typed as NSString).expandingTildeInPath : typed
             Task { @MainActor in
                 await self.patchSpec("spaces", space.metadata, ["workingDir": dir.isEmpty ? NSNull() : dir],
                                      failure: "Could not set the working directory")
