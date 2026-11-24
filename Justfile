@@ -2,8 +2,10 @@ default:
     @just --list
 
 # Build an Apple Silicon release into macos/build/ReleaseLocal/Dense.app
+# A fixed version string: the default one has the git commit in it, which makes
+# every new commit (even a Swift-only one) recompile all the Zig code.
 build:
-    zig build -Doptimize=ReleaseFast -Dxcframework-target=native
+    zig build -Doptimize=ReleaseFast -Dxcframework-target=native -Dversion-string=$(sed -n 's/^    .version = "\(.*\)",$/\1/p' build.zig.zon)-main
 
 # Build a release and pack it into zig-out/Dense.dmg and zig-out/Dense.tar.gz
 release: build
