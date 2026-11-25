@@ -4,6 +4,7 @@ check_for_updates: false
 
 excluded:
   - build
+  - A2UICheck/.build
 
 disabled_rules:
   - cyclomatic_complexity
