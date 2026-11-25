@@ -65,6 +65,11 @@ extension SpaceTabs {
                                                  leadingIcon: "rectangle.split.2x1") { self.glue(tab.id, beside: left.id) })
                 }
             }
+            if tab.spec.terminal != nil, store.den(of: tab)?.running == true {
+                options.append(CommandOption(title: "Reattach Tab", subtitle: tab.spec.title,
+                                             description: "Attach to the tab's den again, as a newly started dense would",
+                                             leadingIcon: "arrow.triangle.2.circlepath") { self.reattach(tab) })
+            }
             if store.den(of: tab)?.running == false {
                 options.append(CommandOption(title: "Restart Den", leadingIcon: "arrow.clockwise") { self.restartDen(tab) })
             }
