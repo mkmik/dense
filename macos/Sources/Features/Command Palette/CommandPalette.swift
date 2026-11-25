@@ -23,6 +23,9 @@ struct CommandOption: Identifiable, Hashable {
     let sortKey: ObjectIdentifier?
     /// Drawn in place of the icon, title, subtitle and badge, which are still searched.
     let row: AnyView?
+    /// Links (URLs) that find this option when one is pasted as the query, as `matchesLink`
+    /// says. Not shown.
+    let links: [String]
     /// The action to perform when this option is selected.
     let action: () -> Void
 
@@ -37,6 +40,7 @@ struct CommandOption: Identifiable, Hashable {
         emphasis: Bool = false,
         sortKey: ObjectIdentifier? = nil,
         row: AnyView? = nil,
+        links: [String] = [],
         action: @escaping () -> Void
     ) {
         self.title = title
@@ -49,6 +53,7 @@ struct CommandOption: Identifiable, Hashable {
         self.emphasis = emphasis
         self.sortKey = sortKey
         self.row = row
+        self.links = links
         self.action = action
     }
 
@@ -562,14 +567,16 @@ struct CommandOptionMatch {
     /// How closely the option's leading color matches a color name in the
     /// query, from 0 (no match) to 1 (exact).
     let colorScore: Double
-    /// Which text field matched, ranked: title (3), subtitle (2),
+    /// Which text field matched, ranked: a link (4), title (3), subtitle (2),
     /// description (1), none (0).
     let textScore: Int
 
     /// Returns nil if the option doesn't match the query at all.
     init?(option: CommandOption, query: String) {
         let colorScore = Self.colorMatchScore(for: option.leadingColor, query: query)
-        let textScore: Int = if option.title.matchedIndices(for: query) != nil {
+        let textScore: Int = if option.links.contains(where: { matchesLink(query, $0) }) {
+            4
+        } else if option.title.matchedIndices(for: query) != nil {
             3
         } else if option.subtitle?.matchedIndices(for: query) != nil {
             2

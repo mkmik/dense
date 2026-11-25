@@ -81,7 +81,8 @@ extension SpaceTabs {
 
     /// Every Space, this machine's then each Host's, in the sidebar's order and drawn as there,
     /// for Open Space (⌘K). The palette searches each one's title, the titles above it, and
-    /// its tags as "#tag". Collapsed Spaces show their subspaces here. The archived Spaces
+    /// its tags as "#tag", and finds it by a pasted link to one of its links (see
+    /// `Space.linkPrefix`), such as its PR. Collapsed Spaces show their subspaces here. The archived Spaces
     /// come last, greyed out and found by "archived" too; opening one brings it back. Each
     /// row shows its whole path, "space / subspace / subsubspace", rather than indenting.
     /// The Spaces shown most recently come first, but for the selected one, which is already
@@ -111,7 +112,8 @@ extension SpaceTabs {
                                           title: [path, Self.title(row.space)].compactMap { $0 }.joined(separator: " / "))
                         .opacity(archived ? 0.5 : 1)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .font(Font(look.font)))
+                        .font(Font(look.font))),
+                    links: row.space.links
                 ) { archived ? self.unarchiveSpace(row.space) : self.select(row.space) }
                 return (option, row.space.id == selected ? 0 : rank[row.space.id] ?? 0)
             }
