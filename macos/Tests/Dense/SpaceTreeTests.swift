@@ -27,6 +27,28 @@ struct SpaceTreeTests {
         #expect(names("  ") == rows.map(\.space.metadata.name))
     }
 
+    @Test func filterByAPastedLinkKeepsTheSpacesWithThatLink() {
+        func linked(_ name: String, _ links: [String: String]) -> Space {
+            var s = space(name, parent: "top")
+            s.metadata.annotations = links.reduce(into: ["other/key": "https://x/pull/9"]) { $0[Space.linkPrefix + $1.key] = $1.value }
+            return s
+        }
+        let rows = Space.rows([
+            space("top"),
+            linked("a", ["review": "https://x/pull/12"]),
+            linked("b", ["review": "https://x/pull/123", "issue": " https://j/browse/T-1\n"]),
+        ])
+        func names(_ query: String) -> [String] { Space.filter(rows, query).map(\.space.metadata.name) }
+        #expect(names("https://x/pull/12") == ["top", "a"])
+        #expect(names("https://x/pull/12/files") == ["top", "a"])
+        #expect(names("https://x/pull/12#discussion") == ["top", "a"])
+        #expect(names("https://x/pull/123") == ["top", "b"])
+        #expect(names("https://j/browse/T-1") == ["top", "b"])
+        #expect(names("https://x/pull/9") == [])
+        #expect(names("https://x/pull/1") == [])
+        #expect(names("https://x/pull/12 b") == [])
+    }
+
     @Test func childrenFollowTheirParentInOrder() {
         let rows = Space.rows([
             space("b", order: 2),

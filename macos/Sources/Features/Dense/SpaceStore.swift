@@ -47,6 +47,30 @@ struct Space: DennetObject {
 
     var metadata: ObjectMeta
     var spec: Spec
+
+    /// The prefix of the annotations that link a Space to what it is about, one link
+    /// each: `link.den.mkm.pub/review` for its worktree's PR or MR (dowt writes it),
+    /// `link.den.mkm.pub/issue` for a ticket, and so on. The name after the "/" says what
+    /// the link is; any tool, or anyone with `dennet annotate`, may write one. Pasting a
+    /// link into Open Space (⌘K) or the sidebar filter finds the Space. Not shown.
+    static let linkPrefix = "link.den.mkm.pub/"
+
+    var links: [String] {
+        (metadata.annotations ?? [:]).compactMap { key, value in
+            let link = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return key.hasPrefix(Self.linkPrefix) && !link.isEmpty ? link : nil
+        }
+    }
+}
+
+/// Whether a pasted query finds link: the same link, or a page under it, so a PR's
+/// "…/pull/12/files" or "…/pull/12#issuecomment-1" finds "…/pull/12", but "…/pull/123"
+/// doesn't. Surrounding spaces and a trailing "/" don't count.
+func matchesLink(_ query: some StringProtocol, _ link: String) -> Bool {
+    let link = link.hasSuffix("/") ? String(link.dropLast()) : link
+    let query = query.trimmingCharacters(in: .whitespaces)
+    guard !link.isEmpty, query.hasPrefix(link) else { return false }
+    return query.count == link.count || "/?#".contains(query[query.index(query.startIndex, offsetBy: link.count)])
 }
 
 /// One tab inside a Space.
@@ -302,13 +326,15 @@ extension Space {
 
     /// The rows a sidebar filter keeps. Words of the query that start with "#" are tags: a
     /// row is kept if it, or a Space above it, has one of those tags exactly, so a tagged
-    /// Space brings its subspaces along. The other words, together, must be in the title.
-    /// The Spaces above a kept row stay too, to show where it is.
+    /// Space brings its subspaces along. Words with "://" are links: a row is kept if one
+    /// of them finds one of its links (see `matchesLink`). The other words, together, must be
+    /// in the title. The Spaces above a kept row stay too, to show where it is.
     static func filter(_ rows: [Row], _ query: String) -> [Row] {
         let words = query.split(whereSeparator: \.isWhitespace)
         let tags = Set(words.filter { $0.hasPrefix("#") && $0.count > 1 }.map { String($0.dropFirst()) })
-        let text = words.filter { !$0.hasPrefix("#") }.joined(separator: " ")
-        guard !tags.isEmpty || !text.isEmpty else { return rows }
+        let links = words.filter { $0.contains("://") }
+        let text = words.filter { !$0.hasPrefix("#") && !$0.contains("://") }.joined(separator: " ")
+        guard !tags.isEmpty || !links.isEmpty || !text.isEmpty else { return rows }
 
         let parents = Dictionary(rows.map { ($0.id, $0.parent) }) { a, _ in a }
         // Rows come after the row above them, so a parent's answer is known first.
@@ -317,6 +343,7 @@ extension Space {
         for row in rows {
             tagged[row.id] = !Set(row.space.spec.tags ?? []).isDisjoint(with: tags) || tagged[row.parent] == true
             guard tags.isEmpty || tagged[row.id] == true,
+                  links.isEmpty || links.contains(where: { link in row.space.links.contains { matchesLink(link, $0) } }),
                   text.isEmpty || (row.space.spec.title ?? row.space.metadata.name).localizedCaseInsensitiveContains(text)
             else { continue }
             var id: String? = row.id
