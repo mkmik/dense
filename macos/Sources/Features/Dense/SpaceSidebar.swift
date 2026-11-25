@@ -5,6 +5,10 @@ import SwiftUI
 /// then each Host's, each under the machine's name and a line. Clicking a Space shows its tabs. A Space can be dragged up or down
 /// among its siblings, taking its subspaces along; a drag never changes its parent.
 ///
+/// Top-level Spaces are sections (such as Focus, Work and Personal): a header with a
+/// chevron that folds it, and a line above each but the first. Their subspaces are not
+/// indented, so sections cost no level of nesting.
+///
 /// It is set in the terminals' font, one text line per row as in a terminal. View > Show
 /// Tree Lines draws lines from each Space to its subspaces.
 struct SpaceSidebar: View {
@@ -130,8 +134,16 @@ struct SpaceSidebar: View {
                         if let host, let problem = store.hostProblems[host] {
                             Text(problem).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
                         }
-                        let guides = treeLines ? Space.guides(rows) : [:]
+                        // Lines as if sections' subspaces were at the top level, as they are drawn.
+                        let guides = treeLines ? Space.guides(rows.map {
+                            Space.Row(space: $0.space, depth: Self.indent($0), parent: $0.parent)
+                        }) : [:]
                         ForEach(rows) { row in
+                            if row.depth == 0 && row.id != rows.first?.id {
+                                Rectangle().frame(height: 1).opacity(0.15)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, cell.height / 4)
+                            }
                             self.row(row, among: rows, guide: guides[row.id])
                         }
                     }
@@ -145,17 +157,23 @@ struct SpaceSidebar: View {
         }
     }
 
-    /// One Space's row. `rows` are the rows of its section; `guide` is set when tree
+    /// How many levels a row is drawn indented: a section's subspaces are not.
+    private static func indent(_ row: Space.Row) -> Int { max(row.depth - 1, 0) }
+
+    /// One Space's row. `rows` are the rows of its machine; `guide` is set when tree
     /// lines are shown.
     private func row(_ row: Space.Row, among rows: [Space.Row], guide: Space.Guide?) -> some View {
         let dy = drag.flatMap { Self.subtree($0.id, rows).contains(row.id) ? $0.dy : nil }
         let cell = self.cell
+        let indent = Self.indent(row)
+        let tabs = self.tabs
         // With tree lines, a subspace's dot sits 5 columns right of its parent's, after
         // "├─ " under the parent's title; without, 2 columns.
-        return SpaceRow(space: row.space, look: look, cell: cell)
-            .padding(.leading, CGFloat(row.depth * (guide == nil ? 2 : 5)) * cell.width)
+        return SpaceRow(space: row.space, look: look, cell: cell,
+                        fold: row.depth == 0 ? { tabs.toggleCollapsed(row.space) } : nil)
+            .padding(.leading, CGFloat(indent * (guide == nil ? 2 : 5)) * cell.width)
             .background(alignment: .leading) {
-                if let guide, row.depth > 0 { TreeLines(guide: guide, cell: cell) }
+                if let guide, indent > 0 { TreeLines(guide: guide, cell: cell) }
             }
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -298,23 +316,34 @@ struct SpaceRow: View {
     let cell: CGSize
     /// Shown in place of the Space's title; Open Space puts the whole path here.
     var title: String? = nil
+    /// Set for a section: a chevron in place of the dot, which calls this to fold or
+    /// unfold it, and the title in grey.
+    var fold: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             // Idle (or unset) is a hollow ring; every other state is a filled dot.
             Group {
-                if space.spec.state == nil || space.spec.state == "idle" {
+                if let fold {
+                    Image(systemName: space.spec.collapsed == true ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: cell.width, height: cell.height)
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: fold)
+                } else if space.spec.state == nil || space.spec.state == "idle" {
                     Circle().strokeBorder(Self.color(space.spec.state), lineWidth: 1)
                 } else {
                     Circle().fill(Self.color(space.spec.state))
                 }
             }
-                .frame(width: 7, height: 7)
+                .frame(width: fold == nil ? 7 : nil, height: fold == nil ? 7 : nil)
                 .frame(width: cell.width, height: cell.height)
             VStack(alignment: .leading, spacing: 0) {
                 // The title on the left, the badges in a line on the right, truncating the title first.
                 HStack(spacing: 4) {
-                    TerminalText(text: title ?? space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name, look: look)
+                    TerminalText(text: title ?? space.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? space.metadata.name,
+                                 look: look, opacity: fold == nil ? 1 : 0.55)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if let badges = space.spec.badges, !badges.isEmpty {
                         ForEach(badges.indices, id: \.self) { i in

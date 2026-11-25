@@ -731,6 +731,14 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
+    /// Folds a Space, hiding its subspaces in every window, or unfolds it.
+    func toggleCollapsed(_ space: Space) {
+        Task { @MainActor in
+            await self.patchSpec("spaces", space.metadata, ["collapsed": space.spec.collapsed == true ? NSNull() : true],
+                                 failure: "Could not fold the Space")
+        }
+    }
+
     /// Asks for the directory a Space's new tabs start in and writes it to dennet. Empty
     /// removes it, and the Space uses the nearest one set above it. While the Space has one
     /// terminal, dennet keeps it at that terminal's directory anyway.
