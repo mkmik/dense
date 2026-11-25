@@ -1043,6 +1043,15 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
+    /// Drops the tab's terminal and attaches to its den again, as a dense started anew
+    /// would: den sends the screen and history over from scratch, at the new terminal's size.
+    func reattach(_ surface: Surface) {
+        // The watch first: den attach exiting here must not close the tab.
+        exits[surface.id] = nil
+        trees[surface.id] = nil
+        show(active.flatMap { SpaceStore.shared.surfaces[$0] } ?? surface)
+    }
+
     /// Asks, then makes the tab's Den again with the same name and spec, so dennet starts
     /// a new den for it and the tab attaches once it runs. For a den that has stopped.
     func restartDen(_ surface: Surface) {
