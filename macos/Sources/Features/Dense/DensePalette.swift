@@ -30,6 +30,8 @@ extension SpaceTabs {
             },
             CommandOption(title: SidebarMenu.treeLines ? "Hide Tree Lines" : "Show Tree Lines",
                           leadingIcon: "list.bullet.indent") { SidebarMenu.treeLines.toggle() },
+            CommandOption(title: SidebarMenu.sections ? "Hide Sections" : "Show Sections",
+                          leadingIcon: "rectangle.split.1x2") { SidebarMenu.sections.toggle() },
         ]
         if let space {
             let name = Self.title(space)
