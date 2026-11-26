@@ -7,7 +7,8 @@ import SwiftUI
 ///
 /// Top-level Spaces are sections (such as Focus, Work and Personal): a header with a
 /// chevron that folds it, and a line above each but the first. Their subspaces are not
-/// indented, so sections cost no level of nesting.
+/// indented, so sections cost no level of nesting. View > Show Sections turns this off,
+/// drawing the plain tree.
 ///
 /// It is set in the terminals' font, one text line per row as in a terminal. View > Show
 /// Tree Lines draws lines from each Space to its subspaces.
@@ -31,6 +32,7 @@ struct SpaceSidebar: View {
     private static let minRows: CGFloat = 6
 
     @AppStorage(SidebarMenu.treeLinesKey) private var treeLines = false
+    @AppStorage(SidebarMenu.noSectionsKey) private var noSections = false
 
     /// The Space being dragged, and how far it has moved.
     @State private var drag: (id: String, dy: CGFloat)?
@@ -136,10 +138,10 @@ struct SpaceSidebar: View {
                         }
                         // Lines as if sections' subspaces were at the top level, as they are drawn.
                         let guides = treeLines ? Space.guides(rows.map {
-                            Space.Row(space: $0.space, depth: Self.indent($0), parent: $0.parent)
+                            Space.Row(space: $0.space, depth: indent($0), parent: $0.parent)
                         }) : [:]
                         ForEach(rows) { row in
-                            if row.depth == 0 && row.id != rows.first?.id {
+                            if !noSections && row.depth == 0 && row.id != rows.first?.id {
                                 Rectangle().frame(height: 1).opacity(0.15)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, cell.height / 4)
@@ -158,19 +160,21 @@ struct SpaceSidebar: View {
     }
 
     /// How many levels a row is drawn indented: a section's subspaces are not.
-    private static func indent(_ row: Space.Row) -> Int { max(row.depth - 1, 0) }
+    private func indent(_ row: Space.Row) -> Int { noSections ? row.depth : max(row.depth - 1, 0) }
 
     /// One Space's row. `rows` are the rows of its machine; `guide` is set when tree
     /// lines are shown.
     private func row(_ row: Space.Row, among rows: [Space.Row], guide: Space.Guide?) -> some View {
         let dy = drag.flatMap { Self.subtree($0.id, rows).contains(row.id) ? $0.dy : nil }
         let cell = self.cell
-        let indent = Self.indent(row)
+        let indent = self.indent(row)
         let tabs = self.tabs
+        // Without sections, a folded top-level Space keeps its chevron so it can be unfolded.
+        let section = row.depth == 0 && (!noSections || row.space.spec.collapsed == true)
         // With tree lines, a subspace's dot sits 5 columns right of its parent's, after
         // "├─ " under the parent's title; without, 2 columns.
         return SpaceRow(space: row.space, look: look, cell: cell,
-                        fold: row.depth == 0 ? { tabs.toggleCollapsed(row.space) } : nil)
+                        fold: section ? { tabs.toggleCollapsed(row.space) } : nil)
             .padding(.leading, CGFloat(indent * (guide == nil ? 2 : 5)) * cell.width)
             .background(alignment: .leading) {
                 if let guide, indent > 0 { TreeLines(guide: guide, cell: cell) }
