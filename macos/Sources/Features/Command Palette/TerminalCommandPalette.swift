@@ -16,6 +16,12 @@ func sortedTerminalPaletteOptions(_ options: [CommandOption]) -> [CommandOption]
     }
 }
 
+/// dense: what the command palette lists: commands, the Spaces to open one (⌘K), or the
+/// Spaces to pick where a new Space goes.
+enum CommandPaletteMode {
+    case commands, openSpace, newSpace
+}
+
 struct TerminalCommandPaletteView: View {
     /// The surface that this command palette represents.
     let surfaceView: Ghostty.SurfaceView
@@ -24,8 +30,8 @@ struct TerminalCommandPaletteView: View {
     /// result in the view disappearing.
     @Binding var isPresented: Bool
 
-    /// dense: list only the Spaces, to open one (⌘K).
-    var spacesOnly = false
+    /// dense: what the palette lists.
+    var mode: CommandPaletteMode = .commands
 
     /// The configuration so we can lookup keyboard shortcuts.
     @ObservedObject var ghosttyConfig: Ghostty.Config
@@ -49,9 +55,9 @@ struct TerminalCommandPaletteView: View {
                         CommandPaletteView(
                             isPresented: $isPresented,
                             backgroundColor: ghosttyConfig.backgroundColor,
-                            options: spacesOnly ? spaceOptions : commandOptions,
-                            placeholder: spacesOnly ? "Open a Space…" : "Execute a command…",
-                            selectsFirst: spacesOnly
+                            options: options,
+                            placeholder: placeholder,
+                            selectsFirst: mode != .commands
                         )
                         .zIndex(1) // Ensure it's on top
 
@@ -72,6 +78,22 @@ struct TerminalCommandPaletteView: View {
                     surfaceView.window?.makeFirstResponder(surfaceView)
                 }
             }
+        }
+    }
+
+    private var placeholder: String {
+        switch mode {
+        case .commands: "Execute a command…"
+        case .openSpace: "Open a Space…"
+        case .newSpace: "New Space under…"
+        }
+    }
+
+    private var options: [CommandOption] {
+        switch mode {
+        case .commands: commandOptions
+        case .openSpace: spaceOptions
+        case .newSpace: parentOptions
         }
     }
 
@@ -155,6 +177,12 @@ struct TerminalCommandPaletteView: View {
     private var spaceOptions: [CommandOption] {
         guard let tabs = (surfaceView.window?.windowController as? TerminalController)?.spaceTabs else { return [] }
         return tabs.openOptions(look: TerminalLook(config: ghosttyConfig, font: tabs.font))
+    }
+
+    /// Every Space, to pick the one a new Space goes under.
+    private var parentOptions: [CommandOption] {
+        guard let tabs = (surfaceView.window?.windowController as? TerminalController)?.spaceTabs else { return [] }
+        return tabs.parentOptions(look: TerminalLook(config: ghosttyConfig, font: tabs.font))
     }
 
     /// Commands for jumping to other terminal surfaces.

@@ -681,6 +681,11 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
+    /// Shows the palette listing the Spaces, to pick the one a new Space goes under.
+    func pickParent() {
+        controller?.showCommandPalette(.newSpace)
+    }
+
     /// Asks for a title and makes a new Space in dennet, under `parent` or at the top
     /// level, after its siblings. Then shows it, with a first terminal tab.
     func newSpace(parent: Space?) {

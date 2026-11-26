@@ -41,7 +41,7 @@ struct SpaceWindowView<Terminal: View>: View {
                     // The titlebar row, right of the window buttons.
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        NotWindowDraggable(content: Button { tabs.newSpace(parent: nil) } label: {
+                        NotWindowDraggable(content: Button { tabs.pickParent() } label: {
                             Image(systemName: "plus").frame(width: 22, height: 22).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
