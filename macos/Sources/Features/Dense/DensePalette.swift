@@ -19,7 +19,11 @@ extension SpaceTabs {
                     NSApp.sendAction(#selector(TerminalController.openSpace(_:)), to: nil, from: nil)
                 }
             },
-            CommandOption(title: "New Space", leadingIcon: "plus.rectangle.on.folder") { self.newSpace(parent: nil) },
+            CommandOption(title: "New Space…", description: "Pick the Space it goes under",
+                          leadingIcon: "plus.rectangle.on.folder") {
+                // Once this palette has closed and given the focus back to the terminal.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.pickParent() }
+            },
             CommandOption(title: "Filter Spaces", description: "Filter the sidebar by title, or #tag",
                           leadingIcon: "line.3.horizontal.decrease.circle") {
                 NotificationCenter.default.post(name: Self.focusFilter, object: self)
@@ -95,36 +99,61 @@ extension SpaceTabs {
     /// one, so ⌘K and Return go back and forth between two Spaces. The palette keeps this
     /// order among the Spaces that match a query equally well.
     func openOptions(look: TerminalLook) -> [CommandOption] {
-        let store = SpaceStore.shared
-        let cell = look.cell
         let rank = Dictionary(recentSpaces.enumerated().map { ($1, $0 + 1) }) { $1 }
         let rows = [false, true].flatMap { archived in
-            let rows = ([nil] + store.hostNames.map(Optional.some)).flatMap { host in
-                Space.rows(store.spaces(on: host, archived: archived).map { space in
-                    var space = space
-                    space.spec.collapsed = nil
-                    return space
-                })
-            }
-            return rows.map { row -> (CommandOption, Int) in
-                let path = Self.path(row.space, in: store.spaces)
-                let tags = row.space.spec.tags.map { $0.map { "#" + $0 }.joined(separator: " ") }
-                let option = CommandOption(
-                    title: Self.title(row.space),
-                    subtitle: path,
-                    description: archived ? ["archived", tags].compactMap { $0 }.joined(separator: " ") : tags,
-                    row: AnyView(SpaceRow(space: row.space, look: look, cell: cell,
-                                          title: [path, Self.title(row.space)].compactMap { $0 }.joined(separator: " / "))
-                        .opacity(archived ? 0.5 : 1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .font(Font(look.font))),
-                    links: row.space.links
-                ) { archived ? self.unarchiveSpace(row.space) : self.select(row.space) }
+            Self.allRows(archived: archived).map { row -> (CommandOption, Int) in
+                let option = Self.option(row.space, look: look, archived: archived) {
+                    archived ? self.unarchiveSpace(row.space) : self.select(row.space)
+                }
                 return (option, row.space.id == selected ? 0 : rank[row.space.id] ?? 0)
             }
         }
         // Stable: unvisited Spaces keep the sidebar's order.
         return rows.enumerated().sorted { ($0.element.1, -$0.offset) > ($1.element.1, -$1.offset) }.map(\.element.0)
+    }
+
+    /// Every Space but the archived ones, to pick the one a new Space goes under. The
+    /// top-level Spaces come first, so they win when they match a query as well as a
+    /// subspace does: "p" puts Personal first. Making a top-level Space comes last.
+    func parentOptions(look: TerminalLook) -> [CommandOption] {
+        let rows = Self.allRows(archived: false)
+        let ordered = rows.filter { $0.depth == 0 } + rows.filter { $0.depth > 0 }
+        return ordered.map { row in
+            Self.option(row.space, look: look, archived: false) { self.newSpace(parent: row.space) }
+        } + [CommandOption(title: "New Top-Level Space", leadingIcon: "plus.rectangle.on.folder") {
+            self.newSpace(parent: nil)
+        }]
+    }
+
+    /// Every Space, this machine's then each Host's, in the sidebar's order, with the
+    /// collapsed Spaces' subspaces too.
+    private static func allRows(archived: Bool) -> [Space.Row] {
+        let store = SpaceStore.shared
+        return ([nil] + store.hostNames.map(Optional.some)).flatMap { host in
+            Space.rows(store.spaces(on: host, archived: archived).map { space in
+                var space = space
+                space.spec.collapsed = nil
+                return space
+            })
+        }
+    }
+
+    /// A Space as a palette row, drawn as in the sidebar with its whole path.
+    private static func option(_ space: Space, look: TerminalLook, archived: Bool,
+                               action: @escaping () -> Void) -> CommandOption {
+        let path = path(space, in: SpaceStore.shared.spaces)
+        let tags = space.spec.tags.map { $0.map { "#" + $0 }.joined(separator: " ") }
+        return CommandOption(
+            title: title(space),
+            subtitle: path,
+            description: archived ? ["archived", tags].compactMap { $0 }.joined(separator: " ") : tags,
+            row: AnyView(SpaceRow(space: space, look: look, cell: look.cell,
+                                  title: [path, title(space)].compactMap { $0 }.joined(separator: " / "))
+                .opacity(archived ? 0.5 : 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .font(Font(look.font))),
+            links: space.links,
+            action: action)
     }
 
     private static func title(_ space: Space) -> String {

@@ -56,8 +56,8 @@ class BaseTerminalController: NSWindowController,
     /// This can be set to show/hide the command palette.
     @Published var commandPaletteIsShowing: Bool = false
 
-    /// dense: the command palette lists only the Spaces, to open one (⌘K).
-    @Published var commandPaletteSpacesOnly = false
+    /// dense: what the command palette lists.
+    @Published var commandPaletteMode: CommandPaletteMode = .commands
 
     /// Set if the terminal view should show the update overlay.
     @Published var updateOverlayIsVisible: Bool = false
@@ -1437,17 +1437,17 @@ class BaseTerminalController: NSWindowController,
     }
 
     @IBAction func toggleCommandPalette(_ sender: Any?) {
-        showCommandPalette(spacesOnly: false)
+        showCommandPalette(.commands)
     }
 
-    /// Shows the command palette, or the Spaces only, or hides it. Asking for the other
-    /// kind while one shows switches to it.
-    func showCommandPalette(spacesOnly: Bool) {
-        if commandPaletteIsShowing && commandPaletteSpacesOnly != spacesOnly {
-            commandPaletteSpacesOnly = spacesOnly
+    /// Shows the command palette in `mode`, or hides it. Asking for another mode while one
+    /// shows switches to it.
+    func showCommandPalette(_ mode: CommandPaletteMode) {
+        if commandPaletteIsShowing && commandPaletteMode != mode {
+            commandPaletteMode = mode
             return
         }
-        commandPaletteSpacesOnly = spacesOnly
+        commandPaletteMode = mode
         commandPaletteIsShowing.toggle()
         if commandPaletteIsShowing {
             // Fix the incorrect focus when toggling from InlineTitleEditor

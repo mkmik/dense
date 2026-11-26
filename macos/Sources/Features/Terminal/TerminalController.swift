@@ -1090,7 +1090,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 
     /// View > Open Space… (⌘K): the command palette, listing only the Spaces.
     @IBAction func openSpace(_ sender: Any?) {
-        showCommandPalette(spacesOnly: true)
+        showCommandPalette(.openSpace)
     }
 
     override func windowDidLoad() {
