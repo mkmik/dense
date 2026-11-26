@@ -37,6 +37,13 @@ small and the front end can be replaced without inventing a new protocol.
  └────────────────────────────────┘
 ```
 
+## Extensions
+
+Other programs can add their own UI to dense: boxes in the sidebar and
+whole tabs. They describe it with [A2UI](https://a2ui.org) and dense draws
+it with native widgets. [dowt](https://github.com/mkmik/dowt) is one such
+Extension.
+
 ## Build
 
 Needs Zig 0.17 and Xcode 26.
