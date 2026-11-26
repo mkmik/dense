@@ -960,6 +960,9 @@ final class SpaceTabs: ObservableObject {
                     self.alert(archive ? "Could not archive the Space" : "Could not delete the Space", error)
                     return
                 }
+                // Its tabs are gone, archived or not, so forget which was in front.
+                for id in ids { self.lastTab[id] = nil; self.recent[id] = nil }
+                UserDefaults.standard.set(self.lastTab, forKey: Self.lastTabKey)
                 // Move off the Space, dropping its tab in front. dennet's watch may not
                 // have reported the changes yet.
                 guard let selected = self.selected, ids.contains(selected) else { return }
