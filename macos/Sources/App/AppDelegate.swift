@@ -1229,6 +1229,14 @@ extension AppDelegate {
         syncMenuShortcut(config, action: "copy_to_clipboard", menuItem: self.menuCopy)
         syncMenuShortcut(config, action: "paste_from_clipboard", menuItem: self.menuPaste)
         syncMenuShortcut(config, action: "paste_from_selection", menuItem: self.menuPasteSelection)
+        // dense: ⌘C and ⌘V are "performable" bindings, which Ghostty leaves out of the menu,
+        // so Edit > Copy and Paste got no shortcut and text fields (Open Space's query, ⌘K)
+        // couldn't copy or paste. The terminal still handles them first when it has the keyboard.
+        // ponytail: also shows ⌘C/⌘V if a config unbinds them; read the binding if that matters.
+        for (item, key) in [(self.menuCopy, "c"), (self.menuPaste, "v")] where item?.keyEquivalent.isEmpty == true {
+            item?.keyEquivalent = key
+            item?.keyEquivalentModifierMask = .command
+        }
         syncMenuShortcut(config, action: "select_all", menuItem: self.menuSelectAll)
         syncMenuShortcut(config, action: "start_search", menuItem: self.menuFind)
         syncMenuShortcut(config, action: "end_search", menuItem: self.menuHideFindBar)
