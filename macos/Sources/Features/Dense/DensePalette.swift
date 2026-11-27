@@ -128,7 +128,7 @@ extension SpaceTabs {
     }
 
     /// Every Space, this machine's then each Host's, in the sidebar's order, with the
-    /// collapsed Spaces' subspaces too.
+    /// collapsed Spaces' subspaces too, each once: not the gathered copies.
     private static func allRows(archived: Bool) -> [Space.Row] {
         let store = SpaceStore.shared
         return ([nil] + store.hostNames.map(Optional.some)).flatMap { host in
@@ -136,7 +136,7 @@ extension SpaceTabs {
                 var space = space
                 space.spec.collapsed = nil
                 return space
-            })
+            }).filter { !$0.gathered }
         }
     }
 

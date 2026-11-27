@@ -61,6 +61,25 @@ struct SpaceTreeTests {
         #expect(rows.map(\.depth) == [0, 0, 1, 1, 0])
     }
 
+    @Test func aSpaceShowsTheSpacesItGathersAfterItsChildrenOneLevelDeep() {
+        var work = space("work", order: 2)
+        work.spec.gather = ["b", "gone", "work2"]
+        var work2 = space("work2", order: 3)
+        work2.spec.gather = ["work"]
+        let rows = Space.rows([
+            space("a", order: 1),
+            space("b", parent: "a"),
+            space("b1", parent: "b"),
+            work,
+            space("w1", parent: "work"),
+            work2,
+        ])
+        #expect(rows.map(\.space.metadata.name) == ["a", "b", "b1", "work", "w1", "b", "work2", "work2", "work"])
+        #expect(rows.map(\.depth) == [0, 1, 2, 0, 1, 1, 1, 0, 1])
+        #expect(rows.map(\.gathered) == [false, false, false, false, false, true, true, false, true])
+        #expect(Set(rows.map(\.id)).count == rows.count)
+    }
+
     @Test func aDenRunsAnAgentWhenAWordOfItsCommandIsOne() {
         func den(_ command: [String]?) -> Den {
             Den(metadata: .init(name: "d", namespace: "default"), spec: .init(command: command))

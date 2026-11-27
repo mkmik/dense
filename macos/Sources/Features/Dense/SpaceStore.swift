@@ -39,6 +39,8 @@ struct Space: DennetObject {
         /// Archived Spaces are hidden from the sidebar and listed in Open Space (⌘K). dennet
         /// deletes an archived Space's tabs and Dens, and archives the Spaces under it.
         var archived: Bool?
+        /// Other Spaces in the namespace shown under this one too, after its children.
+        var gather: [String]?
     }
 
     struct Badge: Decodable, Equatable {
@@ -261,20 +263,26 @@ struct DennetExtension: DennetObject {
 
 extension Space {
     /// A sidebar row: a space, how deep it sits in the tree, and the id of the row it sits
-    /// under ("" at the top level). Rows with the same parent are siblings.
+    /// under ("" at the top level). Rows with the same parent are siblings. A gathered row
+    /// is a second copy of a Space shown under the Space that gathers it (`spec.gather`);
+    /// its id is the gathering row's id, ">", and the Space's id, so it differs from the
+    /// row of the Space at home.
     struct Row: Identifiable, Equatable {
         let space: Space
         let depth: Int
         let parent: String
-        var id: String { space.id }
+        var gathered = false
+        var id: String { gathered ? "\(parent)>\(space.id)" : space.id }
     }
 
-    /// Lays out spaces as sidebar rows: each space is followed by its children, and siblings
-    /// are sorted by order, then name. Children of a collapsed space are left out. A space
-    /// whose parent does not exist is shown at the top level. Spaces whose parents form a
-    /// loop are not shown.
+    /// Lays out spaces as sidebar rows: each space is followed by its children, then the
+    /// Spaces it gathers, in its list's order, without their children. Siblings are sorted
+    /// by order, then name. Children of a collapsed space are left out. A space whose
+    /// parent does not exist is shown at the top level. Spaces whose parents form a loop
+    /// are not shown.
     static func rows(_ spaces: [Space]) -> [Row] {
-        let ids = Set(spaces.map(\.id))
+        let byID = Dictionary(spaces.map { ($0.id, $0) }) { a, _ in a }
+        let ids = Set(byID.keys)
         let children = Dictionary(grouping: spaces) { space in
             let parent = objectID(space.metadata.namespace, space.spec.parent ?? "")
             return ids.contains(parent) ? parent : ""
@@ -286,7 +294,12 @@ extension Space {
             }
             for space in sorted {
                 rows.append(Row(space: space, depth: depth, parent: parent))
-                if space.spec.collapsed != true { add(space.id, depth + 1) }
+                guard space.spec.collapsed != true else { continue }
+                add(space.id, depth + 1)
+                for name in space.spec.gather ?? [] {
+                    guard let other = byID[objectID(space.metadata.namespace, name)] else { continue }
+                    rows.append(Row(space: other, depth: depth + 1, parent: space.id, gathered: true))
+                }
             }
         }
         add("", 0)
