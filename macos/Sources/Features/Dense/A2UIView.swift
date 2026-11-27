@@ -13,11 +13,15 @@ struct A2UIView: View {
     @ObservedObject private var hub = A2UIHub.shared
 
     var body: some View {
-        if let session = hub.sessions[`extension`] {
-            SessionSurface(session: session, name: name)
-        } else {
-            Text("No extension \(`extension`)").font(.caption).foregroundStyle(.secondary)
+        Group {
+            if let session = hub.sessions[`extension`] {
+                SessionSurface(session: session, name: name)
+            } else {
+                Text("No extension \(`extension`)").font(.caption).foregroundStyle(.secondary)
+            }
         }
+        .onAppear { hub.appeared(name) }
+        .onDisappear { hub.disappeared(name) }
     }
 }
 

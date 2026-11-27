@@ -1,12 +1,11 @@
 import A2UICore
 import A2UISwiftUI
+import AppKit
 import Combine
 import Foundation
 import Network
 import OrderedJSON
 
-// ponytail: every surface is subscribed, whether or not a window shows its Space; subscribe
-// per shown Space if 100s of surfaces ever make updates cost something.
 /// The A2UI sessions of this app: one per Extension that has a Surface to show, over the
 /// Unix socket the Extension listens on (t8y: the A2UI surfaces PRD).
 ///
@@ -17,12 +16,21 @@ import OrderedJSON
 /// objects with a "dense" key are dense's own: hello, and subscribe or unsubscribe as
 /// surfaces come and go. Nothing is replayed after a restart: a new
 /// connection asks for fresh snapshots.
+///
+/// Only the surfaces shown last are subscribed, as many as live-terminals in the config,
+/// as with terminals: each costs the Extension a lookup and dense a schema check whenever
+/// it changes. Those on screen always stay. An older one is unsubscribed, and subscribed
+/// again the next time a view shows it.
 @MainActor
 final class A2UIHub: ObservableObject {
     static let shared = A2UIHub()
 
     /// Sessions by Extension id.
     @Published private(set) var sessions: [String: ExtensionSession] = [:]
+
+    /// Surface names shown, the one shown last at the end; and how many views show each now.
+    private var used: [String] = []
+    private var showing: [String: Int] = [:]
 
     private var changes: AnyCancellable?
 
@@ -35,11 +43,42 @@ final class A2UIHub: ObservableObject {
             }
     }
 
+    /// A view shows the surface `name`: it is subscribed, if it wasn't, and kept.
+    func appeared(_ name: String) {
+        showing[name, default: 0] += 1
+        used.removeAll { $0 == name }
+        used.append(name)
+        used = Self.trim(used, showing: Set(showing.keys), limit: (NSApp.delegate as? AppDelegate)?.ghostty.config.liveTerminals ?? 10)
+        sync()
+    }
+
+    /// `used` without those shown longest ago, down to `limit`; those `showing` stay.
+    static func trim(_ used: [String], showing: Set<String>, limit: Int) -> [String] {
+        var used = used
+        while used.count > limit, let old = used.firstIndex(where: { !showing.contains($0) }) {
+            used.remove(at: old)
+        }
+        return used
+    }
+
+    /// A view no longer shows the surface `name`. It stays subscribed until shown longest ago.
+    func disappeared(_ name: String) {
+        showing[name, default: 1] -= 1
+        if showing[name] == 0 { showing[name] = nil }
+    }
+
+    private func sync() {
+        let store = SpaceStore.shared
+        sync(store.extensions, store.surfaces)
+    }
+
     private func sync(_ extensions: [String: DennetExtension], _ surfaces: [String: Surface]) {
-        // Surface names by Extension id.
+        // The Extensions with surfaces, and the names of their surfaces shown last.
         var wanted: [String: Set<String>] = [:]
         for surface in surfaces.values {
-            if let owner = surface.uiExtension { wanted[owner, default: []].insert(surface.metadata.name) }
+            guard let owner = surface.uiExtension else { continue }
+            let name = surface.metadata.name
+            wanted[owner, default: []].formUnion(used.contains(name) ? [name] : [])
         }
         for (id, session) in sessions where extensions[id] == nil {
             session.close()
@@ -49,7 +88,7 @@ final class A2UIHub: ObservableObject {
             let names = wanted[id, default: []]
             if let session = sessions[id] {
                 session.sync(endpoint: ext.spec.endpoint, surfaces: names)
-            } else if !names.isEmpty {
+            } else if wanted[id] != nil {
                 let session = ExtensionSession(namespace: ext.metadata.namespace ?? "default", endpoint: ext.spec.endpoint)
                 sessions[id] = session
                 session.sync(endpoint: ext.spec.endpoint, surfaces: names)
