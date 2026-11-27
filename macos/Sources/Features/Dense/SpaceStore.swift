@@ -7,6 +7,9 @@ struct ObjectMeta: Decodable, Equatable {
     var name: String
     var namespace: String?
     var annotations: [String: String]?
+    /// Set once the object is deleted. dennet keeps it a while (a minute) so that it can be
+    /// brought back by creating it again; dense treats it as gone.
+    var deletionTimestamp: String?
 }
 
 /// An object stored in dennet (`den.mkm.pub/v1alpha1`). Only the fields dense uses are
@@ -459,6 +462,9 @@ final class SpaceStore: ObservableObject {
     /// already there when a watch starts, or starts again, is old.
     let showRequests = PassthroughSubject<ShowRequest, Never>()
 
+    /// Spaces just deleted, by any client, while dennet still keeps them for Undo.
+    let deletedSpaces = PassthroughSubject<Space, Never>()
+
     /// Why dennet can't be reached right now, or nil while the watches are running.
     @Published private(set) var problem: String?
 
@@ -704,12 +710,15 @@ final class SpaceStore: ObservableObject {
                                     if !self.loaded && self.loadedLists.isSuperset(of: ["spaces", "surfaces", "dens", "hosts"]) { self.loaded = true }
                                 }
                             }
-                        } else if let object = event.object {
+                        } else if let object = event.object, object.metadata.deletionTimestamp == nil {
                             initial?[object.id] = object
                         }
                     } else if let object = event.object {
-                        let deleted = event.type == "DELETED"
+                        let deleted = event.type == "DELETED" || object.metadata.deletionTimestamp != nil
                         DispatchQueue.main.async {
+                            if deleted, event.type != "DELETED", let space = object as? Space, self.spaces[space.id] != nil {
+                                self.deletedSpaces.send(space)
+                            }
                             // A Den's status changes often in fields dense doesn't read.
                             let new = deleted ? nil : object
                             if let surface = new as? Surface,
