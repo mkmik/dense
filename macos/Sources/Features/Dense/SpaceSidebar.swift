@@ -138,7 +138,7 @@ struct SpaceSidebar: View {
                         }
                         // Lines as if sections' subspaces were at the top level, as they are drawn.
                         let guides = treeLines ? Space.guides(rows.map {
-                            Space.Row(space: $0.space, depth: indent($0), parent: $0.parent)
+                            Space.Row(space: $0.space, depth: indent($0), parent: $0.parent, gathered: $0.gathered)
                         }) : [:]
                         ForEach(rows) { row in
                             if !noSections && row.depth == 0 && row.id != rows.first?.id {
@@ -182,7 +182,7 @@ struct SpaceSidebar: View {
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                if row.id == tabs.selected {
+                if row.space.id == tabs.selected {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(selection)
                         .shadow(color: .black.opacity(0.1), radius: 1, y: 0.5)
@@ -200,12 +200,12 @@ struct SpaceSidebar: View {
                 .onChanged { drag = (row.id, $0.translation.height) }
                 .onEnded { value in
                     // The Space goes after its siblings whose middle is above the mouse.
-                    let siblings = rows.filter { $0.parent == row.parent }
-                    tabs.moveSpace(row.id, among: siblings.map(\.space), to: siblings.filter {
+                    let siblings = rows.filter { $0.parent == row.parent && !$0.gathered }
+                    tabs.moveSpace(row.space.id, among: siblings.map(\.space), to: siblings.filter {
                         $0.id != row.id && middles[$0.id, default: 0] < value.location.y
                     }.count)
                     drag = nil
-                }, including: filter.isEmpty ? .all : .subviews)
+                }, including: filter.isEmpty && !row.gathered ? .all : .subviews)
             .contextMenu {
                 Button("New Subspace…") { tabs.newSpace(parent: row.space) }
                 Button("Rename…") { tabs.renameSpace(row.space) }
