@@ -157,6 +157,11 @@ struct ShowRequest: Decodable, Equatable {
 
     enum CodingKeys: CodingKey { case space, surface }
 
+    init(space: String?, surface: String?) {
+        self.space = space
+        self.surface = surface
+    }
+
     /// The request on a Surface, if it has one.
     init?(_ asking: Surface) {
         guard let json = asking.metadata.annotations?[Self.annotation],
