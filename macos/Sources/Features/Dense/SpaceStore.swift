@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import Network
@@ -405,9 +406,9 @@ extension Space {
 /// the old list replaced, so a reconnect never shows an empty or half-filled sidebar.
 /// When a connection drops, it reconnects after two seconds.
 final class SpaceStore: ObservableObject {
-    /// The dennet socket. `open -n Dense.app --args -dense.dennetSocket PATH` starts one
-    /// instance on another dennet, as for trying a dennet of a work tree.
-    static let shared = SpaceStore(socketPath: UserDefaults.standard.string(forKey: "dense.dennetSocket")
+    /// The dennet socket: dennet-socket in the config, or dennet's own.
+    static let shared = SpaceStore(socketPath:
+        (NSApplication.shared.delegate as? AppDelegate)?.ghostty.config.dennetSocket
         ?? NSString(string: "~/.local/state/dennet/dennet.sock").expandingTildeInPath)
 
     /// Spaces by `id`.

@@ -21,6 +21,22 @@ struct ConfigTests {
                                         SidebarBox(name: "notes", lines: SidebarBox.defaultLines)])
     }
 
+    @Test func denseSettingsDefault() throws {
+        let config = try TemporaryConfig("")
+        #expect(config.liveTerminals == 10)
+        #expect(config.dennetSocket == nil)
+    }
+
+    @Test func liveTerminalsSet() throws {
+        let config = try TemporaryConfig("live-terminals = 3")
+        #expect(config.liveTerminals == 3)
+    }
+
+    @Test func dennetSocketSet() throws {
+        let config = try TemporaryConfig("dennet-socket = /x/dennet.sock")
+        #expect(config.dennetSocket == "/x/dennet.sock")
+    }
+
     @Test func initialWindowDefaultsToTrue() throws {
         let config = try TemporaryConfig("")
         #expect(config.initialWindow == true)

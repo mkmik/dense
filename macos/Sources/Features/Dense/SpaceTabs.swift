@@ -12,7 +12,7 @@ import GhosttyKit
 /// surface running `den attach`, made the first time the tab is shown while its Den's
 /// status says it runs. Until then the tab waits, and attaches as soon as the status
 /// changes. Tabs out of view keep running, so switching is instant, but only the terminals of
-/// the last few tabs shown (`liveTerminalsKey`, 10 unless set): an older one is freed, and
+/// the last few tabs shown (live-terminals in the config, 10 unless set): an older one is freed, and
 /// attaches again the next time its tab is shown. The terminal the window opened with is closed as soon as a tab is shown.
 ///
 /// A web Surface's tab shows a `WebPage` instead, beside the terminal area or in its place
@@ -103,11 +103,6 @@ final class SpaceTabs: ObservableObject {
 
     /// The tabs with a terminal, by Surface id, the one shown longest ago first.
     private var used: [String] = []
-
-    /// How many terminals a window keeps (`used`): each costs some 30 MB, mostly of GPU
-    /// memory. Unset or 0 means 10. Set with
-    /// `defaults write pub.mkm.dense dense.liveTerminals -int 5`.
-    static let liveTerminalsKey = "dense.liveTerminals"
 
     private var restore: AnyCancellable?
     private var denChanges: AnyCancellable?
@@ -399,13 +394,12 @@ final class SpaceTabs: ObservableObject {
 
     /// Puts a tab in front in the history and in its Space's last and recent tabs.
     /// Notes the tabs in front as the ones shown last, and frees the terminals of the tabs
-    /// shown longest ago, over `liveTerminalsKey`. Their dens keep running; den attach just
+    /// shown longest ago, over live-terminals. Their dens keep running; den attach just
     /// exits, and the tab attaches again when shown.
     private func keepLive(_ shown: [String]) {
         used.removeAll { shown.contains($0) || trees[$0] == nil }
         used += shown
-        let setting = UserDefaults.standard.integer(forKey: Self.liveTerminalsKey)
-        while used.count > max(setting > 0 ? setting : 10, shown.count) {
+        while used.count > max(controller?.ghostty.config.liveTerminals ?? 10, shown.count) {
             let id = used.removeFirst()
             // The watch first: den attach exiting here must not close the tab.
             exits[id] = nil
