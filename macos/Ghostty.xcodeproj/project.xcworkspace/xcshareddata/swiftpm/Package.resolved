@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/a2ui-project/a2ui",
       "state" : {
-        "revision" : "07735d6a654ae3ba25951a8753ddd57b344b1169",
-        "version" : "0.11.0+swift"
+        "revision" : "0c08d86cc0437474d860533096a1fe127f133e71",
+        "version" : "0.12.0+swift"
       }
     },
     {
