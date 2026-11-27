@@ -41,6 +41,8 @@ struct SpaceSidebar: View {
     /// Whether the filter field is open, and the text in it.
     @State private var filtering = false
     @State private var filter = ""
+    /// The filter is switched off: its text is kept, grayed out, but filters nothing.
+    @State private var filterOff = false
     @State private var filterHover = false
     @FocusState private var filterFocused: Bool
 
@@ -59,19 +61,33 @@ struct SpaceSidebar: View {
     /// The bottom of the sidebar, laid out like Rex's: a filter icon that never moves. On
     /// hover a light pill shows behind it with the word "Filter"; a click turns the word
     /// into a field that filters the Spaces by title, or by tag with "#tag", on a darker pill while it has the
-    /// focus. Esc, or leaving the field empty, closes it.
+    /// focus. Esc, or leaving the field empty, closes it. With text in the field, a click
+    /// on the icon switches the filter off, keeping the text grayed out; a click on the
+    /// field (or the icon again) switches it back on.
     private var filterBar: some View {
         HStack(spacing: 7) {
-            Image(systemName: filter.isEmpty
+            Image(systemName: activeFilter.isEmpty
                   ? "line.3.horizontal.decrease.circle"
                   : "line.3.horizontal.decrease.circle.fill")
                 .font(.system(size: 16))
                 .foregroundStyle(filterFocused ? .primary : .secondary)
+                .onTapGesture {
+                    if filter.isEmpty || filterOff {
+                        openFilter()
+                    } else {
+                        filterOff = true
+                        filterFocused = false
+                    }
+                }
+                .help(filter.isEmpty ? "" : filterOff ? "Switch the filter on" : "Switch the filter off")
             if filtering {
                 TextField("Filter", text: $filter)
                     .textFieldStyle(.plain)
                     .focused($filterFocused)
                     .onExitCommand { closeFilter() }
+                    .opacity(filterOff ? 0.4 : 1)
+                    // While off, a click goes to the bar, which switches the filter back on.
+                    .allowsHitTesting(!filterOff)
                 if !filter.isEmpty {
                     Button(action: closeFilter) {
                         Image(systemName: "xmark.circle.fill")
@@ -91,14 +107,11 @@ struct SpaceSidebar: View {
         .background(Capsule().fill(Color.primary.opacity(filterFocused ? 0.075 : filterHover || filtering ? 0.037 : 0)))
         .contentShape(Capsule())
         .onHover { filterHover = $0 }
-        .onTapGesture {
-            filtering = true
-            // Once the field is there.
-            DispatchQueue.main.async { filterFocused = true }
-        }
+        .onTapGesture(perform: openFilter)
         .onReceive(NotificationCenter.default.publisher(for: SpaceTabs.focusFilter)) { note in
             guard note.object as AnyObject? === tabs else { return }
             filtering = true
+            filterOff = false
             // After the command palette has given the focus back to the terminal.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { filterFocused = true }
         }
@@ -110,16 +123,28 @@ struct SpaceSidebar: View {
         .padding(.bottom, 6.5)
     }
 
+    /// Opens the field, switching the filter back on, and focuses it.
+    private func openFilter() {
+        filtering = true
+        filterOff = false
+        // Once the field is there.
+        DispatchQueue.main.async { filterFocused = true }
+    }
+
     private func closeFilter() {
         filter = ""
+        filterOff = false
         filtering = false
         filterFocused = false
     }
 
     /// The rows of one machine's Spaces, through the filter.
     private func rows(on host: String?) -> [Space.Row] {
-        Space.filter(Space.rows(store.spaces(on: host)), filter)
+        Space.filter(Space.rows(store.spaces(on: host)), activeFilter)
     }
+
+    /// What the Spaces are filtered by: nothing while the filter is switched off.
+    private var activeFilter: String { filterOff ? "" : filter }
 
     private var spaces: some View {
         ScrollView {
@@ -131,7 +156,7 @@ struct SpaceSidebar: View {
                 ForEach([nil] + store.hostNames.map(Optional.some), id: \.self) { host in
                     let rows = self.rows(on: host)
                     // While filtering, a machine with no match is left out.
-                    if filter.isEmpty || !rows.isEmpty {
+                    if activeFilter.isEmpty || !rows.isEmpty {
                         HostHeader(name: host ?? "localhost", look: look)
                         if let host, let problem = store.hostProblems[host] {
                             Text(problem).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 8)
@@ -205,7 +230,7 @@ struct SpaceSidebar: View {
                         $0.id != row.id && middles[$0.id, default: 0] < value.location.y
                     }.count)
                     drag = nil
-                }, including: filter.isEmpty && !row.gathered ? .all : .subviews)
+                }, including: activeFilter.isEmpty && !row.gathered ? .all : .subviews)
             .contextMenu {
                 Button("New Subspace…") { tabs.newSpace(parent: row.space) }
                 Button("Rename…") { tabs.renameSpace(row.space) }
