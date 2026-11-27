@@ -1,7 +1,7 @@
 #--------------------------------------------------------------------
 # Generate documentation with Doxygen
 #--------------------------------------------------------------------
-FROM --platform=linux/amd64 archlinux:latest AS builder
+FROM --platform=linux/amd64 archlinux:latest@sha256:375a401bb3c6376b37f40b6dfa25067db37ec78d0b7af67ae6315f43a0184a9d AS builder
 
 # Build argument for noindex header
 ARG ADD_NOINDEX_HEADER=false
@@ -24,7 +24,7 @@ RUN doxygen
 #--------------------------------------------------------------------
 # Host the static HTML
 #--------------------------------------------------------------------
-FROM nginx:alpine AS runtime
+FROM nginx:alpine@sha256:7fc0fb4af7bf006aeb31aea88069976060f8f0a0a86b667126742cc17f4e31ae AS runtime
 
 # Pass build arg to runtime stage
 ARG ADD_NOINDEX_HEADER=false
