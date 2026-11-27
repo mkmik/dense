@@ -462,8 +462,9 @@ final class SpaceStore: ObservableObject {
     /// already there when a watch starts, or starts again, is old.
     let showRequests = PassthroughSubject<ShowRequest, Never>()
 
-    /// Spaces just deleted, by any client, while dennet still keeps them for Undo.
-    let deletedSpaces = PassthroughSubject<Space, Never>()
+    /// Spaces and Surfaces just deleted, by any client, while dennet still keeps them for
+    /// Undo. Each delete is sent once.
+    let deleted = PassthroughSubject<any DennetObject, Never>()
 
     /// Why dennet can't be reached right now, or nil while the watches are running.
     @Published private(set) var problem: String?
@@ -667,6 +668,9 @@ final class SpaceStore: ObservableObject {
         var streaming = false
         // The full list being rebuilt from the watch's initial events; nil once it is live.
         var initial: [String: Object]? = [:]
+        // The ids of the objects being deleted, so that each delete is sent once: dennet may
+        // change one while it keeps it, and a watch started again lists it with the rest.
+        var marked = Set<String>()
 
         func fail(_ message: String) {
             DispatchQueue.main.async {
@@ -710,15 +714,23 @@ final class SpaceStore: ObservableObject {
                                     if !self.loaded && self.loadedLists.isSuperset(of: ["spaces", "surfaces", "dens", "hosts"]) { self.loaded = true }
                                 }
                             }
-                        } else if let object = event.object, object.metadata.deletionTimestamp == nil {
-                            initial?[object.id] = object
+                        } else if let object = event.object {
+                            if object.metadata.deletionTimestamp == nil {
+                                initial?[object.id] = object
+                            } else {
+                                marked.insert(object.id)
+                            }
                         }
                     } else if let object = event.object {
                         let deleted = event.type == "DELETED" || object.metadata.deletionTimestamp != nil
+                        var justMarked = false
+                        if deleted && event.type != "DELETED" {
+                            justMarked = marked.insert(object.id).inserted
+                        } else {
+                            marked.remove(object.id)
+                        }
                         DispatchQueue.main.async {
-                            if deleted, event.type != "DELETED", let space = object as? Space, self.spaces[space.id] != nil {
-                                self.deletedSpaces.send(space)
-                            }
+                            if justMarked, object is Space || object is Surface { self.deleted.send(object) }
                             // A Den's status changes often in fields dense doesn't read.
                             let new = deleted ? nil : object
                             if let surface = new as? Surface,
