@@ -190,11 +190,9 @@ final class SpaceTabs: ObservableObject {
                 }
             }
             // The tab in front was deleted, here or by another client. Its den runs on for
-            // Undo, so its terminal doesn't exit by itself: the next tab takes its place.
+            // Undo, so its terminal doesn't exit by itself: the next tab takes its place. The
+            // terminal is only hidden, kept attached, so Undo shows it again as it was.
             if let id = self.active, surfaces[id] == nil {
-                // The watch first: den attach exiting here must not close the tab.
-                self.exits[id] = nil
-                self.trees[id] = nil
                 let next = self.tab(after: id)
                 self.active = nil
                 return self.show(next)
@@ -962,8 +960,7 @@ final class SpaceTabs: ObservableObject {
                 // Undo comes from dennet's watch, as for a Space another client deletes
                 // (see `undoDeletes`).
                 do {
-                    // dennet would close an archived Space's tabs too, but this also drops
-                    // their terminals here.
+                    // dennet would close an archived Space's tabs too, but later.
                     for surface in surfaces { try await self.delete(surface) }
                     // Children first, so no subspace shows at the top level for a moment.
                     // dennet archives the subspaces of an archived Space too, but later.
@@ -1302,8 +1299,9 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
-    /// Deletes a tab's Surface, and its Den in dennet unless `keepDen`, and drops its
-    /// terminal or page.
+    /// Deletes a tab's Surface, and its Den in dennet unless `keepDen`, and drops its page.
+    /// Its terminal stays attached, out of sight, so Undo shows it again as it was. It goes
+    /// with the terminals shown longest ago (see `keepLive`).
     @MainActor
     private func delete(_ surface: Surface, keepDen: Bool = false) async throws {
         let store = SpaceStore.shared
@@ -1315,7 +1313,6 @@ final class SpaceTabs: ObservableObject {
         if !keepDen, let den = store.den(of: surface) {
             _ = try await store.request("DELETE", "\(root)/dens/\(den.metadata.name)")
         }
-        trees[surface.id] = nil
         pages[surface.id] = nil
     }
 
