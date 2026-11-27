@@ -3046,6 +3046,23 @@ keybind: Keybinds = .{},
 /// An empty value clears the list.
 @"sidebar-box": SidebarBoxes = .{},
 
+/// How many tabs a dense window keeps a terminal for: the ones shown last.
+/// Each costs some 30 MB, mostly of GPU memory. When there are more, the
+/// terminal of the tab shown longest ago is freed. Its den keeps running,
+/// and the tab attaches to it again when shown. The tabs on screen always
+/// keep theirs, so 0 frees every tab as soon as it is hidden.
+@"live-terminals": u32 = 10,
+
+/// The Unix socket of the dennet dense talks to. Unset, it is
+/// `~/.local/state/dennet/dennet.sock`. Read once, when dense starts.
+/// Given on the command line, it starts one instance on another dennet,
+/// as for trying a dennet of a work tree:
+///
+/// ```
+/// open -n Dense.app --args --dennet-socket=/path/to/dennet.sock
+/// ```
+@"dennet-socket": ?Path = null,
+
 /// Sets the reporting format for OSC sequences that request color information.
 /// Ghostty currently supports OSC 10 (foreground), OSC 11 (background), and
 /// OSC 4 (256 color palette) queries, and by default the reported values

@@ -732,6 +732,25 @@ extension Ghostty {
             }
         }
 
+        /// How many tabs a dense window keeps a terminal for (live-terminals).
+        var liveTerminals: Int {
+            guard let config = self.config else { return 10 }
+            var v: UInt32 = 10
+            let key = "live-terminals"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return Int(v)
+        }
+
+        /// The dennet socket set with dennet-socket, nil when it is not set.
+        var dennetSocket: String? {
+            guard let config = self.config else { return nil }
+            var v = ghostty_config_path_s()
+            let key = "dennet-socket"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return nil }
+            let path = String(cString: v.path)
+            return path.isEmpty ? nil : path
+        }
+
         var progressStyle: Bool {
             guard let config = self.config else { return true }
             var v = true

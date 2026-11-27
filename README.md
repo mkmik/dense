@@ -53,7 +53,8 @@ Needs Zig 0.17 and Xcode 26.
 
 dense has its own bundle ID (`pub.mkm.dense`), so it can be installed and
 run alongside Ghostty. It needs dennet running at
-`~/.local/state/dennet/dennet.sock`.
+`~/.local/state/dennet/dennet.sock`, or at the socket set with
+`dennet-socket` in the config.
 
 ## Config
 
