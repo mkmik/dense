@@ -203,6 +203,7 @@ final class SpaceTabs: ObservableObject {
             self.pendingShow = nil
             if !self.go(to: request) { self.pendingShow = (request, Date() + 10) }
         }
+        _ = Self.undoDeletes
         pendingChanges = store.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in
             guard let self, let pending = self.pendingShow else { return }
             if Date() > pending.until || self.go(to: pending.request) { self.pendingShow = nil }
@@ -919,9 +920,9 @@ final class SpaceTabs: ObservableObject {
             if subspaces > 0 { gone.append(subspaces == 1 ? "1 subspace" : "\(subspaces) subspaces") }
             if !surfaces.isEmpty { gone.append(surfaces.count == 1 ? "1 tab" : "\(surfaces.count) tabs") }
             alert.informativeText = gone.isEmpty
-                ? "Undo (⌘Z) brings it back."
-                : "Its \(gone.joined(separator: " and ")) will be deleted too, and their terminal sessions will be terminated. "
-                + "Undo (⌘Z) brings them back, with new terminal sessions."
+                ? "Undo (⌘Z) within a minute brings it back."
+                : "Its \(gone.joined(separator: " and ")) will be deleted too, and their terminal sessions will be terminated "
+                + "in a minute. Undo (⌘Z) before then brings them back as they were."
             alert.addButton(withTitle: "Delete")
         }
         alert.addButton(withTitle: "Cancel")
@@ -936,32 +937,9 @@ final class SpaceTabs: ObservableObject {
 
             Task { @MainActor in
                 let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)"
-                // What Undo makes again, in this order: the Spaces parents first, the Dens,
-                // then the tabs that attach to them.
-                var saved: [Saved] = []
+                // Undo comes from dennet's watch, as for a Space another client deletes
+                // (see `undoDeletes`).
                 do {
-                    if !archive {
-                        var tabs: [Saved] = []
-                        for gone in doomed {
-                            saved.append(("spaces", "Space", try await Self.snapshot("\(root)/spaces/\(gone.metadata.name)")))
-                        }
-                        for surface in surfaces {
-                            // A Den that has already gone is not brought back.
-                            if let den = store.den(of: surface),
-                               var object = try? await Self.snapshot("\(root)/dens/\(den.metadata.name)") {
-                                // The new den starts where its shell last was, when this
-                                // window has its terminal to tell.
-                                let view = self.trees[surface.id]?.root?.leftmostLeaf() ?? self.sidebarTerminals[surface.id]
-                                if let pwd = view?.pwd, !pwd.isEmpty, var spec = object["spec"] as? [String: Any] {
-                                    spec["workingDir"] = pwd
-                                    object["spec"] = spec
-                                }
-                                saved.append(("dens", "Den", object))
-                            }
-                            tabs.append(("surfaces", "Surface", try await Self.snapshot("\(root)/surfaces/\(surface.metadata.name)")))
-                        }
-                        saved += tabs
-                    }
                     // dennet would close an archived Space's tabs too, but this also drops
                     // their terminals here.
                     for surface in surfaces { try await self.delete(surface) }
@@ -979,17 +957,6 @@ final class SpaceTabs: ObservableObject {
                 } catch {
                     self.alert(archive ? "Could not archive the Space" : "Could not delete the Space", error)
                     return
-                }
-                if !archive {
-                    let front = self.lastTab[space.id] ?? surfaces.first { $0.spec.space == space.metadata.name }?.id
-                    let show = ShowRequest(space: space.id, surface: front)
-                    // ponytail: fixed 10 minutes, the window a later step may keep the dens
-                    // detached for, so Undo could attach to them instead of starting new ones.
-                    let undo = (NSApp.delegate as? AppDelegate)?.undoManager
-                    undo?.registerUndo(withTarget: self, expiresAfter: .seconds(600)) {
-                        $0.undelete(saved, namespace: namespace, show: show)
-                    }
-                    undo?.setActionName("Delete Space")
                 }
                 // Its tabs are gone, archived or not, so forget which was in front.
                 for id in ids { self.lastTab[id] = nil; self.recent[id] = nil }
@@ -1013,39 +980,112 @@ final class SpaceTabs: ObservableObject {
         }
     }
 
-    /// A dennet object to make again: its kind, and its name, labels, annotations and spec.
-    private typealias Saved = (resource: String, kind: String, object: [String: Any])
+    /// Offers Undo (⌘Z) for Spaces deleted by any client (dense, dowt, `dennet delete`),
+    /// once for the whole app: the Spaces one delete takes arrive together, and are one Undo.
+    /// ponytail: expires after dennet's default `--undo-grace` of a minute; read it from
+    /// dennet if anyone changes it.
+    private static let undoDeletes = SpaceStore.shared.deletedSpaces
+        .collect(.byTime(DispatchQueue.main, .milliseconds(500)))
+        .filter { !$0.isEmpty }
+        .sink { spaces in
+            let undo = (NSApp.delegate as? AppDelegate)?.undoManager
+            undo?.registerUndo(withTarget: SpaceStore.shared, expiresAfter: .seconds(60)) { _ in
+                Task { @MainActor in await bringBack(spaces) }
+            }
+            undo?.setActionName(spaces.count == 1 ? "Delete Space" : "Delete Spaces")
+        }
 
-    /// Undo of Delete Space: makes its Spaces, Dens and tabs again, as they were, then shows
-    /// the Space. The Dens start new terminal sessions, with the same settings; what ran in
-    /// the old ones is gone.
-    private func undelete(_ saved: [Saved], namespace: String, show: ShowRequest) {
-        Task { @MainActor in
-            let store = SpaceStore.shared
-            let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)"
-            do {
-                for (resource, kind, object) in saved {
-                    var metadata = object["metadata"] as? [String: Any] ?? [:]
+    /// A dennet object to make again: its resource, kind and the object as dennet has it.
+    typealias Revivable = (resource: String, kind: String, object: [String: Any])
+
+    /// What bringing back `spaces` (names, in one namespace) makes again, from dennet's
+    /// lists of Spaces, Surfaces and Dens: those Spaces and the deleted Spaces under them,
+    /// parents first; the deleted Dens of their deleted tabs; then those tabs. Only objects
+    /// still being deleted count: one deleted for good is gone, a live one is fine.
+    static func revivable(_ spaces: Set<String>, spaceList: [[String: Any]], surfaceList: [[String: Any]],
+                          denList: [[String: Any]]) -> [Revivable] {
+        func deleting(_ list: [[String: Any]]) -> [String: [String: Any]] {
+            var out: [String: [String: Any]] = [:]
+            for object in list {
+                let meta = object["metadata"] as? [String: Any]
+                if meta?["deletionTimestamp"] != nil, let name = meta?["name"] as? String { out[name] = object }
+            }
+            return out
+        }
+        func spec(_ object: [String: Any]) -> [String: Any] { object["spec"] as? [String: Any] ?? [:] }
+        let deletedSpaces = deleting(spaceList), deletedDens = deleting(denList)
+        var order = spaces.sorted().filter { deletedSpaces[$0] != nil }
+        var seen = Set(order)
+        var i = 0
+        while i < order.count {
+            let parent = order[i]
+            for (name, space) in deletedSpaces.sorted(by: { $0.key < $1.key })
+            where spec(space)["parent"] as? String == parent && seen.insert(name).inserted {
+                order.append(name)
+            }
+            i += 1
+        }
+        let tabs = deleting(surfaceList).sorted { $0.key < $1.key }.map(\.value)
+            .filter { seen.contains(spec($0)["space"] as? String ?? "") }
+        var dens: [Revivable] = [], denSeen: Set<String> = []
+        for tab in tabs {
+            if let den = (spec(tab)["terminal"] as? [String: Any])?["den"] as? String,
+               let object = deletedDens[den], denSeen.insert(den).inserted {
+                dens.append(("dens", "Den", object))
+            }
+        }
+        return dens + order.compactMap { deletedSpaces[$0].map { ("spaces", "Space", $0) } }
+            + tabs.map { ("surfaces", "Surface", $0) }
+    }
+
+    /// Undo of a Space's delete: creates again the Spaces, tabs and Dens dennet still keeps
+    /// from it, which dennet brings back as they were. The Dens never stopped, so the tabs
+    /// attach to the same terminal sessions. Then the key window shows the Space.
+    @MainActor
+    private static func bringBack(_ spaces: [Space]) async {
+        let store = SpaceStore.shared
+        let tabs = DenseCatalog.keyController?.spaceTabs
+        func failed(_ error: Error) {
+            if let tabs { return tabs.alert("Could not bring back the Space", error) }
+            NSAlert(error: error).runModal()
+        }
+        var made = 0
+        do {
+            for (namespace, group) in Dictionary(grouping: spaces, by: { $0.metadata.namespace ?? "default" }) {
+                let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)"
+                func list(_ resource: String) async throws -> [[String: Any]] {
+                    let data = try await store.request("GET", "\(root)/\(resource)")
+                    return (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["items"] as? [[String: Any]] ?? []
+                }
+                let objects = revivable(Set(group.map(\.metadata.name)), spaceList: try await list("spaces"),
+                                        surfaceList: try await list("surfaces"), denList: try await list("dens"))
+                for (resource, kind, object) in objects {
+                    let old = object["metadata"] as? [String: Any] ?? [:]
+                    var metadata: [String: Any] = [:]
+                    for key in ["name", "labels", "annotations"] { metadata[key] = old[key] }
                     // An old request to show a tab must not be made again.
                     if var annotations = metadata["annotations"] as? [String: Any] {
                         annotations[ShowRequest.annotation] = nil
                         metadata["annotations"] = annotations
                     }
-                    if resource == "dens", let name = metadata["name"] as? String {
-                        try await Self.waitGone("\(root)/dens/\(name)")
-                    }
                     let _: Created = try await store.create(
                         resource, kind: kind, namespace: namespace, metadata: metadata,
                         spec: object["spec"] as? [String: Any] ?? [:])
+                    made += 1
                 }
-            } catch {
-                self.alert("Could not bring back the Space", error)
-                return
             }
-            // Once dennet's watch has reported them.
-            self.pendingShow = (show, Date() + 10)
-            if self.go(to: show) { self.pendingShow = nil }
+        } catch {
+            return failed(error)
         }
+        guard made > 0 else {
+            return failed(SpaceStore.RequestError(message: "dennet keeps a deleted Space for a minute only. It is gone."))
+        }
+        // The top Space, once dennet's watch has reported it.
+        guard let tabs,
+              let top = spaces.first(where: { space in !spaces.contains { $0.metadata.name == space.spec.parent } }) else { return }
+        let show = ShowRequest(space: top.id, surface: nil)
+        tabs.pendingShow = (show, Date() + 10)
+        if tabs.go(to: show) { tabs.pendingShow = nil }
     }
 
     /// Brings back an archived Space, from Open Space (⌘K): dennet reopens it, and it is
@@ -1171,7 +1211,8 @@ final class SpaceTabs: ObservableObject {
         let namespace = den.metadata.namespace ?? "default"
         let path = "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)/dens/\(den.metadata.name)"
         let old = try await snapshot(path)
-        _ = try await store.request("DELETE", path)
+        // Now, not after dennet's minute for Undo.
+        _ = try await store.request("DELETE", "\(path)?gracePeriodSeconds=0")
         try await waitGone(path)
         let _: Created = try await store.create(
             "dens", kind: "Den", namespace: namespace, metadata: old["metadata"] as? [String: Any] ?? [:],
