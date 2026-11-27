@@ -7,7 +7,7 @@ let package = Package(
     name: "A2UICheck",
     platforms: [.macOS(.v14)],
     dependencies: [
-        .package(url: "https://github.com/a2ui-project/a2ui", exact: "0.11.0"),
+        .package(url: "https://github.com/a2ui-project/a2ui", exact: "0.12.0+swift"),
     ],
     targets: [
         .executableTarget(
