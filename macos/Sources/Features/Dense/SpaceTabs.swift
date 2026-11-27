@@ -189,6 +189,16 @@ final class SpaceTabs: ObservableObject {
                     self.pages[id] = nil
                 }
             }
+            // The tab in front was deleted, here or by another client. Its den runs on for
+            // Undo, so its terminal doesn't exit by itself: the next tab takes its place.
+            if let id = self.active, surfaces[id] == nil {
+                // The watch first: den attach exiting here must not close the tab.
+                self.exits[id] = nil
+                self.trees[id] = nil
+                let next = self.tab(after: id)
+                self.active = nil
+                return self.show(next)
+            }
             guard let surface = self.active.flatMap({ surfaces[$0] }),
                   self.combo(of: surface).map(\.id) != self.shownCombo else { return }
             self.show(surface)
@@ -935,6 +945,18 @@ final class SpaceTabs: ObservableObject {
             let keepSubspaces = alert.suppressionButton?.state == .on
             if archive { UserDefaults.standard.set(keepSubspaces, forKey: Self.archiveSubspacesKey) }
 
+            // Move off the Space first, dropping its tab in front, so that no tab of it is
+            // shown as the next while they go.
+            if let selected = self.selected, ids.contains(selected) {
+                self.active = nil
+                if let next = Space.rows(store.spaces.values.filter { !ids.contains($0.id) && $0.spec.archived != true }).first {
+                    self.select(next.space)
+                } else {
+                    self.selected = nil
+                    self.show(nil)
+                }
+            }
+
             Task { @MainActor in
                 let root = "/apis/den.mkm.pub/v1alpha1/namespaces/\(namespace)"
                 // Undo comes from dennet's watch, as for a Space another client deletes
@@ -961,16 +983,6 @@ final class SpaceTabs: ObservableObject {
                 // Its tabs are gone, archived or not, so forget which was in front.
                 for id in ids { self.lastTab[id] = nil; self.recent[id] = nil }
                 UserDefaults.standard.set(self.lastTab, forKey: Self.lastTabKey)
-                // Move off the Space, dropping its tab in front. dennet's watch may not
-                // have reported the changes yet.
-                guard let selected = self.selected, ids.contains(selected) else { return }
-                self.active = nil
-                if let next = Space.rows(store.spaces.values.filter { !ids.contains($0.id) && $0.spec.archived != true }).first {
-                    self.select(next.space)
-                } else {
-                    self.selected = nil
-                    self.show(nil)
-                }
             }
         }
         if let window = controller?.window {
