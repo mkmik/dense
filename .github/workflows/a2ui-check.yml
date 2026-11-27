@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: macos
-      - uses: actions/cache@v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: macos/A2UICheck/.build
           key: a2ui-check-${{ hashFiles('macos/Ghostty.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'macos/A2UICheck/Package.swift') }}
