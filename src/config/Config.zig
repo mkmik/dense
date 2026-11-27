@@ -3051,6 +3051,10 @@ keybind: Keybinds = .{},
 /// terminal of the tab shown longest ago is freed. Its den keeps running,
 /// and the tab attaches to it again when shown. The tabs on screen always
 /// keep theirs, so 0 frees every tab as soon as it is hidden.
+///
+/// It also bounds the Extension panels (ui Surfaces) dense keeps up to date:
+/// the ones shown last, across windows. An older one is asked for again
+/// when shown.
 @"live-terminals": u32 = 10,
 
 /// The Unix socket of the dennet dense talks to. Unset, it is

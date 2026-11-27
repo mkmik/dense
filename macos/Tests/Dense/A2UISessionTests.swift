@@ -7,6 +7,14 @@ import Testing
 /// snapshot drawn with dense's catalog, a click, a bad message, and a reconnect.
 @MainActor
 struct A2UISessionTests {
+    /// Surfaces shown longest ago go first, but never those on screen.
+    @Test func trimKeepsLastShown() {
+        #expect(A2UIHub.trim(["a", "b", "c", "d"], showing: [], limit: 2) == ["c", "d"])
+        #expect(A2UIHub.trim(["a", "b", "c", "d"], showing: ["a"], limit: 2) == ["a", "d"])
+        #expect(A2UIHub.trim(["a", "b", "c"], showing: ["a", "b", "c"], limit: 1) == ["a", "b", "c"])
+        #expect(A2UIHub.trim(["a"], showing: [], limit: 0) == [])
+    }
+
     @Test func sessionWithAnExtension() async throws {
         let ext = try FakeExtension()
         let session = ExtensionSession(namespace: "default", endpoint: ext.path)
