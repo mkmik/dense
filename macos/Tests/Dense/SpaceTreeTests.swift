@@ -78,6 +78,8 @@ struct SpaceTreeTests {
         #expect(rows.map(\.depth) == [0, 1, 2, 0, 1, 1, 1, 0, 1])
         #expect(rows.map(\.gathered) == [false, false, false, false, false, true, true, false, true])
         #expect(Set(rows.map(\.id)).count == rows.count)
+        // A gathered row is titled after its Space's parent; a top-level one keeps its own.
+        #expect(rows.map(\.title) == [nil, nil, nil, nil, nil, "a", nil, nil, nil])
     }
 
     @Test func aDenRunsAnAgentWhenAWordOfItsCommandIsOne() {
