@@ -138,7 +138,7 @@ struct SpaceSidebar: View {
                         }
                         // Lines as if sections' subspaces were at the top level, as they are drawn.
                         let guides = treeLines ? Space.guides(rows.map {
-                            Space.Row(space: $0.space, depth: indent($0), parent: $0.parent, gathered: $0.gathered)
+                            Space.Row(space: $0.space, depth: indent($0), parent: $0.parent, gathered: $0.gathered, title: $0.title)
                         }) : [:]
                         ForEach(rows) { row in
                             if !noSections && row.depth == 0 && row.id != rows.first?.id {
@@ -173,7 +173,7 @@ struct SpaceSidebar: View {
         let section = row.depth == 0 && (!noSections || row.space.spec.collapsed == true)
         // With tree lines, a subspace's dot sits 5 columns right of its parent's, after
         // "├─ " under the parent's title; without, 2 columns.
-        return SpaceRow(space: row.space, look: look, cell: cell,
+        return SpaceRow(space: row.space, look: look, cell: cell, title: row.title,
                         fold: section ? { tabs.toggleCollapsed(row.space) } : nil)
             .padding(.leading, CGFloat(indent * (guide == nil ? 2 : 5)) * cell.width)
             .background(alignment: .leading) {

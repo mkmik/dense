@@ -266,12 +266,15 @@ extension Space {
     /// under ("" at the top level). Rows with the same parent are siblings. A gathered row
     /// is a second copy of a Space shown under the Space that gathers it (`spec.gather`);
     /// its id is the gathering row's id, ">", and the Space's id, so it differs from the
-    /// row of the Space at home.
+    /// row of the Space at home. A gathered row is titled after the gathered Space's own
+    /// parent (its project), since the gathering Space already names the topic.
     struct Row: Identifiable, Equatable {
         let space: Space
         let depth: Int
         let parent: String
         var gathered = false
+        /// Shown in place of the Space's title, or nil.
+        var title: String? = nil
         var id: String { gathered ? "\(parent)>\(space.id)" : space.id }
     }
 
@@ -298,7 +301,9 @@ extension Space {
                 add(space.id, depth + 1)
                 for name in space.spec.gather ?? [] {
                     guard let other = byID[objectID(space.metadata.namespace, name)] else { continue }
-                    rows.append(Row(space: other, depth: depth + 1, parent: space.id, gathered: true))
+                    let home = other.spec.parent.flatMap { byID[objectID(other.metadata.namespace, $0)] }
+                    let title = home.map { $0.spec.title.flatMap { $0.isEmpty ? nil : $0 } ?? $0.metadata.name }
+                    rows.append(Row(space: other, depth: depth + 1, parent: space.id, gathered: true, title: title))
                 }
             }
         }
@@ -358,7 +363,7 @@ extension Space {
             tagged[row.id] = !Set(row.space.spec.tags ?? []).isDisjoint(with: tags) || tagged[row.parent] == true
             guard tags.isEmpty || tagged[row.id] == true,
                   links.isEmpty || links.contains(where: { link in row.space.links.contains { matchesLink(link, $0) } }),
-                  text.isEmpty || (row.space.spec.title ?? row.space.metadata.name).localizedCaseInsensitiveContains(text)
+                  text.isEmpty || (row.title ?? row.space.spec.title ?? row.space.metadata.name).localizedCaseInsensitiveContains(text)
             else { continue }
             var id: String? = row.id
             while let current = id, !current.isEmpty, keep.insert(current).inserted { id = parents[current] }
